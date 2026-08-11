@@ -1,0 +1,14 @@
+/Nowy folder/tests
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+artifacts/
+publish/
+*.db
+*.db-shm
+*.db-wal
+work/dotnet10/
+work/dotnet-install.ps1
