@@ -1,0 +1,44 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.GoogleSheetsConnectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Connect Google Sheets" Width="620" Height="520" ResizeMode="NoResize"
+        Style="{StaticResource DialogWindowStyle}" WindowStartupLocation="CenterOwner">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Text="Connect this profile to Google Sheets" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1" Margin="0,7,0,18" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedBrush}"
+                   Text="Create a Desktop app OAuth client in Google Cloud, enable the Google Sheets API, then paste its client details below. Authorization opens in your browser and returns directly to Log O'clock." />
+        <StackPanel Grid.Row="2">
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Desktop OAuth client" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Open Google Cloud" Click="OpenGoogleCloud_Click" />
+            </Grid>
+            <TextBlock Text="Client ID" Foreground="{StaticResource MutedBrush}" Margin="2,0,0,4" />
+            <TextBox x:Name="ClientIdText" AutomationProperties.Name="Google OAuth client ID" />
+            <TextBlock Text="Client secret" Foreground="{StaticResource MutedBrush}" Margin="2,12,0,4" />
+            <PasswordBox x:Name="ClientSecretText" AutomationProperties.Name="Google OAuth client secret" />
+        </StackPanel>
+        <TextBlock Grid.Row="3" Margin="2,15,2,0" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedBrush}"
+                   Text="The client details and refresh token are stored only in Windows Credential Manager for this profile. Log O'clock requests access to files it creates; it does not inspect unrelated Drive files." />
+        <TextBlock x:Name="ValidationText" Grid.Row="4" Margin="3,14,3,0"
+                   Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" />
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" IsCancel="True" />
+            <Button x:Name="ConnectButton" Content="Connect in browser" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Connect_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,41 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Log O'clock"
+           Manufacturer="Zachariasz Jędrzejczyk"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="2F8C2B3D-E281-4CA5-BDB0-4F68DE1EA0B2"
+           Scope="perMachine"
+           InstallerVersion="500">
+    <SummaryInformation Description="Log O'clock Windows desktop time tracker by Zachariasz Jędrzejczyk" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Log O'clock is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+    <Icon Id="ProjectTimeTrackerIcon" SourceFile="..\src\ProjectTimeTracker.Windows\Assets\AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ProjectTimeTrackerIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Log O'clock" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Log O'clock" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Log O'clock" Level="1">
+      <Component Id="ApplicationComponent" Directory="INSTALLFOLDER" Guid="B013AB89-527B-4292-A3BE-68186231DDE4">
+        <File Id="ApplicationExecutable" Source="$(var.AppPublishDir)\LogOClock.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut"
+                    Directory="ApplicationProgramsFolder"
+                    Name="Log O'clock"
+                    Description="Track time by client, project, and task"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Advertise="yes" />
+        </File>
+        <RemoveFolder Id="RemoveStartMenuFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\ProjectTimeTracker"
+                       Name="Installed"
+                       Type="integer"
+                       Value="1" />
+      </Component>
+    </Feature>
+  </Package>
+</Wix>

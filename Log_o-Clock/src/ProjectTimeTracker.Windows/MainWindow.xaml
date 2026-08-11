@@ -1,0 +1,2061 @@
+<Window x:Class="ProjectTimeTracker.Windows.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:local="clr-namespace:ProjectTimeTracker.Windows"
+        xmlns:controls="clr-namespace:ProjectTimeTracker.Windows.Controls"
+        xmlns:converters="clr-namespace:ProjectTimeTracker.Windows.Converters"
+        xmlns:services="clr-namespace:ProjectTimeTracker.Windows.Services"
+        Title="Log O'clock" Width="1180" Height="800" MinWidth="800" MinHeight="660"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" Background="{StaticResource SurfaceAppBrush}"
+        StateChanged="MainWindow_StateChanged" SizeChanged="MainWindow_SizeChanged"
+        PreviewMouseDown="MainWindow_PreviewMouseDown"
+        services:WindowBackdropService.Role="MainShell">
+    <Window.Resources>
+        <converters:HistoryGroupDurationConverter x:Key="HistoryGroupDurationConverter" />
+        <converters:WrapOpportunityConverter x:Key="WrapOpportunityConverter" />
+        <Style x:Key="DateRangeShortcutButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Style.Triggers>
+                <Trigger Property="local:MainWindow.DateRangeShortcutActive" Value="True">
+                    <Setter Property="Background" Value="{StaticResource SelectionBrush}" />
+                    <Setter Property="BorderBrush" Value="Transparent" />
+                    <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ProfileSelectorButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="7,2" />
+            <Setter Property="Margin" Value="7,0,0,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Foreground" Value="{StaticResource ContentTertiaryBrush}" />
+            <Setter Property="FontSize" Value="10" />
+        </Style>
+        <DataTemplate x:Key="SidebarTargetRowTemplate">
+            <Grid Margin="4,5,4,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.ColumnSpan="2" LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding Client}" MaxWidth="82"
+                               Foreground="{StaticResource ProjectClientTextBrush}" FontSize="11"
+                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Ellipse DockPanel.Dock="Right" Width="5" Height="5" Margin="8,1,8,0"
+                             Fill="{StaticResource ProjectClientDotBrush}" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ProjectName}" Foreground="{StaticResource InkBrush}"
+                               FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <Border x:Name="DailyTargetLine" Grid.Row="1" Margin="0,3,0,0"
+                        Padding="3,1" CornerRadius="3" Background="Transparent">
+                    <DockPanel>
+                        <TextBlock x:Name="DailyTargetMarker" Text="D" Width="18"
+                                   Foreground="{StaticResource TargetDailyBrush}"
+                                   FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <TextBlock x:Name="DailyTargetValue" Text="{Binding Daily}"
+                                   Foreground="{StaticResource ContentSecondaryBrush}"
+                                   FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                </Border>
+
+                <DockPanel x:Name="WeeklyTargetLine" Grid.Row="2" Margin="0,2,0,0">
+                    <TextBlock x:Name="WeeklyTargetMarker" Text="W" Width="18" Foreground="{StaticResource TargetWeeklyBrush}"
+                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Weekly}" Foreground="{StaticResource ContentSecondaryBrush}"
+                               FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <DockPanel x:Name="MonthlyTargetLine" Grid.Row="3" Margin="0,2,0,0">
+                    <TextBlock x:Name="MonthlyTargetMarker" Text="M" Width="18" Foreground="{StaticResource TargetMonthlyBrush}"
+                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Monthly}" Foreground="{StaticResource ContentSecondaryBrush}"
+                               FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <DockPanel x:Name="OneTimeTargetLine" Grid.Row="4" Margin="0,2,0,0">
+                    <TextBlock Text="1×" Width="18" Foreground="{StaticResource ContentTertiaryBrush}"
+                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding OneTime}" Foreground="{StaticResource ContentSecondaryBrush}"
+                               FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+
+                <controls:TargetProgressRing x:Name="SidebarTargetProgressRing"
+                                             Grid.Column="1" Grid.Row="1" Grid.RowSpan="4"
+                                             Width="40" Height="40" Margin="8,3,2,0"
+                                             VerticalAlignment="Center"
+                                             DailyProgress="{Binding DailyProgress}"
+                                             WeeklyProgress="{Binding WeeklyProgress}"
+                                             MonthlyProgress="{Binding MonthlyProgress}"
+                                             DailyBrush="{StaticResource TargetDailyBrush}"
+                                             WeeklyBrush="{StaticResource TargetWeeklyBrush}"
+                                             MonthlyBrush="{StaticResource TargetMonthlyBrush}"
+                                             TrackBrush="{StaticResource BorderStandardBrush}"
+                                             StrokeThickness="4"
+                                             ToolTip="Daily, weekly, and monthly target progress"
+                                             AutomationProperties.Name="Daily, weekly, and monthly target progress">
+                    <controls:TargetProgressRing.Style>
+                        <Style TargetType="controls:TargetProgressRing">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                             Value="SidebarTargetRing">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsOneTimeTarget}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </controls:TargetProgressRing.Style>
+                </controls:TargetProgressRing>
+
+                <TextBlock x:Name="DebtTargetLine" Grid.Row="5" Grid.ColumnSpan="2" Margin="18,3,0,0"
+                           Text="{Binding Debt}" Foreground="{StaticResource WarningBrush}"
+                           FontFamily="Consolas" FontSize="10" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="CanceledDebtTargetLine" Grid.Row="6" Grid.ColumnSpan="2" Margin="18,3,0,0"
+                           Text="{Binding CanceledDebt}" Foreground="{StaticResource ContentTertiaryBrush}"
+                           FontSize="10" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding DailyTargetHours}" Value="{x:Null}">
+                    <Setter TargetName="DailyTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsDailyReached}" Value="True">
+                    <Setter TargetName="DailyTargetLine" Property="Background" Value="{StaticResource DailyTargetCompleteBrush}" />
+                    <Setter TargetName="DailyTargetValue" Property="Foreground" Value="{StaticResource ContentPrimaryBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding WeeklyTargetHours}" Value="{x:Null}">
+                    <Setter TargetName="WeeklyTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding MonthlyTargetHours}" Value="{x:Null}">
+                    <Setter TargetName="MonthlyTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding OneTimeTargetHours}" Value="{x:Null}">
+                    <Setter TargetName="OneTimeTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HasDebt}" Value="False">
+                    <Setter TargetName="DebtTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding HasCanceledDebt}" Value="False">
+                    <Setter TargetName="CanceledDebtTargetLine" Property="Visibility" Value="Collapsed" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <Style x:Key="SidebarTargetItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="TargetRowSurface"
+                                Background="{TemplateBinding Background}"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TargetRowSurface" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SidebarTargetsListStyle" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource SidebarTargetItemStyle}" />
+        </Style>
+
+        <Style x:Key="SidebarTargetsResizeThumbStyle" TargetType="Thumb">
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Cursor" Value="SizeNS" />
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Border x:Name="ResizeIndicator"
+                                    Width="36" Height="2"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    CornerRadius="1"
+                                    Background="{StaticResource BorderStandardBrush}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ResizeIndicator"
+                                        Property="Background"
+                                        Value="{StaticResource ContentSecondaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsDragging" Value="True">
+                                <Setter TargetName="ResizeIndicator"
+                                        Property="Background"
+                                        Value="{StaticResource ContentPrimaryBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ReportTargetItemStyle" TargetType="ListBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="46" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="TargetRowSurface"
+                                Background="Transparent"
+                                Padding="{TemplateBinding Padding}"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="TargetRowSurface" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="ReportTargetsListStyle" TargetType="ListBox" BasedOn="{StaticResource SidebarTargetsListStyle}">
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Auto" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource ReportTargetItemStyle}" />
+        </Style>
+        <Style x:Key="TargetReviewChoiceStyle" TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,0,6,6" />
+            <Setter Property="Padding" Value="10,5" />
+            <Setter Property="Foreground" Value="{StaticResource ContentSecondaryBrush}" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Border x:Name="ChoiceBorder" Background="{StaticResource StateRestBrush}"
+                                    BorderBrush="{StaticResource BorderStandardBrush}" BorderThickness="1"
+                                    CornerRadius="10" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="Background" Value="{StaticResource SelectionBrush}" />
+                                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{StaticResource StrongBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="Background" Value="{StaticResource StateHoverBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ChoiceBorder" Property="Background" Value="{StaticResource StatePressedBrush}" />
+                                <Setter TargetName="ChoiceBorder" Property="BorderBrush" Value="{StaticResource ContentSecondaryBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource ContentPrimaryBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="7" CornerRadius="0" GlassFrameThickness="0" />
+    </shell:WindowChrome.WindowChrome>
+    <Border x:Name="WindowShell" Background="{StaticResource SurfaceAppBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+            BorderThickness="1">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="46" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Background="{StaticResource SurfaceAppBrush}" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TitleSidebarColumn" Width="275" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Background="{StaticResource SurfaceSidebarBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                    BorderThickness="0,0,1,1" Padding="14,0">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="26" Height="26" CornerRadius="8" Background="Transparent" Margin="0,0,10,0">
+                        <Image Source="/Assets/AppIcon.png" Width="24" Height="24" Stretch="Uniform"
+                               AutomationProperties.Name="Log O'clock icon" />
+                    </Border>
+                    <TextBlock Text="Time Tracker" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+                    <Button x:Name="ProfileButton"
+                            Style="{StaticResource ProfileSelectorButtonStyle}"
+                            Click="ProfileButton_Click"
+                            ToolTip="Switch or manage local profiles"
+                            AutomationProperties.Name="Switch or manage local profiles">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="ProfileNameText"
+                                       MaxWidth="70"
+                                       TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource Icon.ChevronDown}"
+                                  Stroke="{StaticResource ContentTertiaryBrush}"
+                                  StrokeThickness="2"
+                                  StrokeStartLineCap="Round"
+                                  StrokeEndLineCap="Round"
+                                  StrokeLineJoin="Round"
+                                  Stretch="Uniform"
+                                  Width="11" Height="11"
+                                  Margin="5,0,0,0"
+                                  VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+            <Grid Grid.Column="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="NavigationToggleButton" Style="{StaticResource IconButton}" Visibility="Collapsed"
+                        Margin="8,0,4,0" Click="NavigationToggleButton_Click" ToolTip="Open navigation"
+                        AutomationProperties.Name="Open navigation">
+                    <Path Data="{StaticResource Icon.Menu}" Style="{StaticResource ChromeIconPathStyle}" Width="18" Height="18" />
+                </Button>
+                <TextBlock Grid.Column="1" Text="Log O'clock" Foreground="{StaticResource ContentSecondaryBrush}"
+                           FontSize="12" VerticalAlignment="Center" Margin="12,0" />
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <Button x:Name="MinimizeWindowButton" Style="{StaticResource TitleBarButton}" Click="MinimizeWindow_Click" ToolTip="Minimize"
+                            AutomationProperties.Name="Minimize">
+                        <Path Data="{StaticResource Icon.Minimize}" Style="{StaticResource ChromeIconPathStyle}" />
+                    </Button>
+                    <Button x:Name="MaximizeWindowButton" Style="{StaticResource TitleBarButton}" Click="MaximizeWindow_Click" ToolTip="Maximize or restore"
+                            AutomationProperties.Name="Maximize or restore">
+                        <Path Data="{StaticResource Icon.Maximize}" Style="{StaticResource ChromeIconPathStyle}" />
+                    </Button>
+                    <Button x:Name="CloseWindowButton" Style="{StaticResource TitleBarButton}" Click="CloseWindow_Click" ToolTip="Close"
+                            AutomationProperties.Name="Close">
+                        <Path Data="{StaticResource Icon.Close}" Style="{StaticResource ChromeIconPathStyle}" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <Popup x:Name="NavigationPopup" Grid.Row="0" PlacementTarget="{Binding ElementName=NavigationToggleButton}"
+               Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+            <Border Width="228" Margin="0,6,0,0" Style="{StaticResource FloatingNavigationSurfaceStyle}">
+                <StackPanel>
+                    <Button Content="History" Tag="0" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                    <Button Content="Clients &amp; Projects" Tag="1" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                    <Button Content="Reports" Tag="2" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                    <Button Content="Settings" Tag="3" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                    <Separator Margin="4,8" />
+                    <TextBlock Text="TARGETS" Margin="8,0,8,4" Foreground="{StaticResource ContentTertiaryBrush}"
+                               FontSize="10" FontWeight="SemiBold" />
+                    <ListBox x:Name="FloatingTargetsGrid" MaxHeight="240" Tag="SidebarTargetRing"
+                             Style="{StaticResource SidebarTargetsListStyle}"
+                             ItemTemplate="{StaticResource SidebarTargetRowTemplate}"
+                             PreviewMouseRightButtonDown="SelectTargetOnRightClick"
+                             MouseDoubleClick="TargetsList_MouseDoubleClick"
+                             ContextMenuOpening="RequireTargetSelection_ContextMenuOpening">
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Edit target..." Click="EditTargetProject_Click" />
+                                <MenuItem Header="Lower debt..." Click="LowerTargetDebt_Click" />
+                                <MenuItem Header="Cancel debt" Click="CancelTargetDebt_Click" />
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
+                    <TextBlock Text="No targets set" Margin="8,3,8,6" Foreground="{StaticResource ContentTertiaryBrush}"
+                               FontSize="11" FontStyle="Italic">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ElementName=FloatingTargetsGrid, Path=HasItems}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </Popup>
+
+        <Grid Grid.Row="1" Background="{StaticResource SurfaceAppBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TimerSidebarColumn" Width="275" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Background="{StaticResource SurfaceSidebarBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                    BorderThickness="0,0,1,0" />
+            <Border Grid.Column="1" MaxWidth="896" HorizontalAlignment="Center" Background="{StaticResource SurfaceEditorBrush}"
+                    BorderBrush="{StaticResource BorderStandardBrush}" BorderThickness="1"
+                    CornerRadius="{StaticResource Radius.Composer}" Padding="10" Margin="20,16">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="24" ShadowDepth="6" Direction="270" Opacity="0.26" Color="#FF000000" />
+                </Border.Effect>
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="TimerTaskColumn" Width="220" />
+                        <ColumnDefinition x:Name="TimerProjectColumn" Width="270" />
+                        <ColumnDefinition x:Name="TimerDescriptionColumn" Width="*" />
+                        <ColumnDefinition x:Name="TimerElapsedColumn" Width="104" />
+                        <ColumnDefinition x:Name="TimerActionColumn" Width="104" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="TimerTaskCombo" Grid.Column="0" DisplayMemberPath="Name" SelectedValuePath="Id"
+                               IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                               SelectionChanged="TimerTaskCombo_SelectionChanged"
+                               PreviewKeyDown="TimerBarEditor_PreviewKeyDown"
+                               ToolTip="Select a task or type a new task name" AutomationProperties.Name="Task" />
+                    <ComboBox x:Name="TimerProjectCombo" Grid.Column="1" SelectedValuePath="ProjectId"
+                              ItemTemplate="{StaticResource TimerProjectOptionTemplate}"
+                              ItemContainerStyle="{StaticResource TimerProjectComboItemStyle}"
+                              SelectionChanged="TimerProjectCombo_SelectionChanged"
+                              PreviewKeyDown="TimerBarEditor_PreviewKeyDown" ToolTip="Project and client"
+                              AutomationProperties.Name="Project and client" />
+                    <controls:TagDescriptionEditor x:Name="TimerDescriptionText" Grid.Column="2" AcceptsReturn="False"
+                                                   Style="{StaticResource TagEditorStyle}" VerticalContentAlignment="Center"
+                                                   PreviewKeyDown="TimerBarEditor_PreviewKeyDown"
+                                                   ToolTip="Description" AutomationProperties.Name="Description" />
+                    <TextBlock x:Name="ElapsedText" Grid.Column="3" Text="00:00:00" FontFamily="Consolas" FontSize="17"
+                               FontWeight="SemiBold" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                    <Button x:Name="StartStopButton" Grid.Column="4" Content="Start" Style="{StaticResource PrimaryButton}"
+                            Click="StartStopButton_Click" />
+                    <StackPanel x:Name="TimerStartTimePanel"
+                                Grid.Row="1"
+                                Grid.Column="0"
+                                Orientation="Horizontal"
+                                Margin="3,7,0,0"
+                                HorizontalAlignment="Left"
+                                Visibility="Collapsed">
+                        <TextBlock Text="Started"
+                                   Margin="0,0,8,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentTertiaryBrush}"
+                                   FontSize="11" />
+                        <TextBox x:Name="TimerStartTimeText"
+                                 Width="76"
+                                 Margin="0"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Edit the timer start time. A time later than now is treated as yesterday."
+                                 AutomationProperties.Name="Timer start time"
+                                 TextChanged="TimerStartTimeText_TextChanged"
+                                 LostKeyboardFocus="TimerStartTimeText_LostKeyboardFocus"
+                                 PreviewKeyDown="TimerBarEditor_PreviewKeyDown" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <TabControl Grid.Row="2" x:Name="MainTabs" TabStripPlacement="Left" Background="Transparent"
+                    Style="{StaticResource SideTabControlStyle}" ItemContainerStyle="{StaticResource SideTabItemStyle}"
+                    SelectionChanged="MainTabs_SelectionChanged">
+            <TabItem Header="History">
+                <Grid Margin="24,20,24,24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="History" Style="{StaticResource PageTitleTextStyle}" />
+                            <TextBlock Text="Review, edit, and reconcile tracked entries" Style="{StaticResource PageDescriptionTextStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                            <Button x:Name="HistorySaveViewButton"
+                                    Content="Save Current View"
+                                    Visibility="Collapsed"
+                                    Click="HistorySaveView_Click" />
+                            <Button x:Name="HistoryColumnsButton"
+                                    Style="{StaticResource IconButton}"
+                                    Margin="8,0,0,0"
+                                    Click="HistoryColumns_Click"
+                                    ToolTip="History view settings"
+                                    AutomationProperties.Name="History view settings">
+                                <Path Data="{StaticResource Icon.Menu}"
+                                      Style="{StaticResource ChromeIconPathStyle}" />
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem x:Name="HistoryWrapTextMenuItem"
+                                                  Header="Wrap text"
+                                                  IsCheckable="True"
+                                                  StaysOpenOnClick="True"
+                                                  Click="HistoryWrapTextMenuItem_Click" />
+                                        <Separator />
+                                        <MenuItem Header="Columns" Tag="HistoryColumnsSubmenu" />
+                                        <Separator />
+                                        <MenuItem Header="Restore default" Click="HistoryRestoreDefaultView_Click" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                    <DockPanel Grid.Row="1" Margin="0,0,0,12">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                            <Button Content="Refresh" Click="RefreshHistory_Click" />
+                        </StackPanel>
+                        <WrapPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                <TextBlock Text="Date" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <controls:DateRangePicker x:Name="HistoryRangePicker" Width="235" FontSize="11"
+                                                          RangeChanged="HistoryDateRangeChanged" />
+                            </StackPanel>
+                            <Button x:Name="HistoryThisMonthButton"
+                                    Content="This month"
+                                    Tag="ThisMonth"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="0,0,4,4"
+                                    Click="HistoryDateRangeShortcut_Click" />
+                            <Button x:Name="HistoryThisWeekButton"
+                                    Content="This week"
+                                    Tag="ThisWeek"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="0,0,4,4"
+                                    Click="HistoryDateRangeShortcut_Click" />
+                            <Button x:Name="HistoryTodayButton"
+                                    Content="Today"
+                                    Tag="Today"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="0,0,8,4"
+                                    Click="HistoryDateRangeShortcut_Click" />
+                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                <TextBlock Text="Project" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <ComboBox x:Name="HistoryProjectCombo" Width="190" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="HistoryProjectChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                <TextBlock Text="Task" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <ComboBox x:Name="HistoryTaskCombo" Width="140" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="HistoryFilterChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                <TextBlock Text="Tag" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <ComboBox x:Name="HistoryTagCombo" Width="96" SelectionChanged="HistoryTagChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding Color}" FontWeight="Bold" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,8,0">
+                                <TextBlock Text="Description" VerticalAlignment="Center" Margin="0,0,5,0" />
+                                <TextBox x:Name="HistoryDescriptionFilterText"
+                                         Width="180"
+                                         TextChanged="HistoryDescriptionFilterText_TextChanged"
+                                         ToolTip="Filter descriptions by text"
+                                         AutomationProperties.Name="Filter History by description" />
+                            </StackPanel>
+                        </WrapPanel>
+                    </DockPanel>
+                    <DataGrid x:Name="HistoryGrid" Grid.Row="2" MouseDoubleClick="HistoryGrid_MouseDoubleClick"
+                              SelectionMode="Extended" SelectionUnit="FullRow" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                              ContextMenuOpening="HistoryGrid_ContextMenuOpening" RowHeight="42" MinRowHeight="42"
+                              local:MainWindow.HistoryTextWrapping="False">
+                        <DataGrid.Resources>
+                            <Style x:Key="HistoryPassiveSelectionRowStyle"
+                                   TargetType="{x:Type DataGridRow}"
+                                   BasedOn="{StaticResource {x:Type DataGridRow}}">
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="Transparent" />
+                                    </Trigger>
+                                    <MultiTrigger>
+                                        <MultiTrigger.Conditions>
+                                            <Condition Property="IsSelected" Value="True" />
+                                            <Condition Property="IsMouseOver" Value="True" />
+                                        </MultiTrigger.Conditions>
+                                        <Setter Property="Background" Value="{StaticResource HoverBrush}" />
+                                    </MultiTrigger>
+                                </Style.Triggers>
+                            </Style>
+                            <Style x:Key="HistoryPassiveSelectionCellStyle"
+                                   TargetType="{x:Type DataGridCell}"
+                                   BasedOn="{StaticResource {x:Type DataGridCell}}">
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                            <Style x:Key="HistoryWrapAwareCellTextStyle"
+                                   TargetType="{x:Type TextBlock}"
+                                   BasedOn="{StaticResource DataGridCellTextStyle}">
+                                <Setter Property="TextWrapping" Value="NoWrap" />
+                                <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                <Style.Triggers>
+                                    <DataTrigger Value="True"
+                                                 Binding="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=(local:MainWindow.HistoryTextWrapping)}">
+                                        <Setter Property="TextWrapping" Value="WrapWithOverflow" />
+                                        <Setter Property="TextTrimming" Value="None" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                            <ContextMenu x:Key="HistoryColumnHeaderMenu" x:Shared="False"
+                                         DataContext="{Binding PlacementTarget.Column, RelativeSource={RelativeSource Self}}">
+                                <MenuItem Header="Hide column" Click="HistoryHideColumn_Click" />
+                            </ContextMenu>
+                        </DataGrid.Resources>
+                        <DataGrid.RowStyle>
+                            <StaticResource ResourceKey="HistoryPassiveSelectionRowStyle" />
+                        </DataGrid.RowStyle>
+                        <DataGrid.CellStyle>
+                            <StaticResource ResourceKey="HistoryPassiveSelectionCellStyle" />
+                        </DataGrid.CellStyle>
+                        <DataGrid.ColumnHeaderStyle>
+                            <Style TargetType="{x:Type DataGridColumnHeader}"
+                                   BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                <Setter Property="ContextMenu" Value="{StaticResource HistoryColumnHeaderMenu}" />
+                            </Style>
+                        </DataGrid.ColumnHeaderStyle>
+                        <DataGrid.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Continue" Tag="EntryOnly" Click="ContinueEntry_Click" />
+                                <MenuItem Header="Add entry…" Tag="EmptyOnly" Click="AddEntry_Click" />
+                                <MenuItem Header="Edit…" Tag="EntryOnly" Click="EditEntry_Click" />
+                                <Separator Tag="EntryOnly" />
+                                <MenuItem Header="Mark selected as paid" Tag="EntryOnly" Click="MarkSelectedPaid_Click" />
+                                <MenuItem Header="Mark selected as unpaid" Tag="EntryOnly" Click="MarkSelectedUnpaid_Click" />
+                                <Separator Tag="EntryOnly" />
+                                <MenuItem Header="Delete" Tag="EntryOnly" Click="DeleteEntry_Click" />
+                            </ContextMenu>
+                        </DataGrid.ContextMenu>
+                        <DataGrid.GroupStyle>
+                            <GroupStyle>
+                                <GroupStyle.ContainerStyle>
+                                    <Style TargetType="{x:Type GroupItem}">
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="{x:Type GroupItem}">
+                                                    <StackPanel>
+                                                        <Border Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                                                BorderThickness="0,1,0,1" Padding="0,6" Margin="0,8,0,0">
+                                                            <Grid MinWidth="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=ActualWidth}">
+                                                                <TextBlock Text="{Binding Name}"
+                                                                           Margin="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=Tag.DateMargin}"
+                                                                           FontSize="12" FontWeight="SemiBold"
+                                                                           VerticalAlignment="Center" />
+                                                                <TextBlock Text="{Binding Converter={StaticResource HistoryGroupDurationConverter}}"
+                                                                           Tag="HistoryDayDurationTotal"
+                                                                           Margin="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=Tag.DurationMargin}"
+                                                                           Visibility="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=Tag.Visibility}"
+                                                                           FontFamily="Consolas"
+                                                                           FontSize="14" FontWeight="SemiBold"
+                                                                           VerticalAlignment="Center" />
+                                                            </Grid>
+                                                        </Border>
+                                                        <ItemsPresenter />
+                                                    </StackPanel>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </GroupStyle.ContainerStyle>
+                            </GroupStyle>
+                        </DataGrid.GroupStyle>
+                        <DataGrid.Columns>
+                            <DataGridTextColumn x:Name="HistoryClientColumn" Header="Client" Binding="{Binding Client, Converter={StaticResource WrapOpportunityConverter}}" Width="95" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryProjectColumn" Header="Project" Binding="{Binding Project, Converter={StaticResource WrapOpportunityConverter}}" Width="115" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTemplateColumn x:Name="HistoryTaskColumn" Header="Task" Width="100">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Task, Converter={StaticResource WrapOpportunityConverter}}"
+                                                   Style="{StaticResource HistoryWrapAwareCellTextStyle}"
+                                                   HorizontalAlignment="Left"
+                                                   VerticalAlignment="Center" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn x:Name="HistoryDescriptionColumn" Header="Description" Width="150">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <controls:TagDescriptionDisplay SourceText="{Binding DescriptionSource}"
+                                                                        TagDefinitions="{Binding TagDefinitions}"
+                                                                        Style="{StaticResource HistoryWrapAwareCellTextStyle}"
+                                                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTemplateColumn x:Name="HistoryTagsColumn" Header="Tags" Width="105">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <controls:TagDescriptionDisplay SourceText="{Binding TagsSource}"
+                                                                        TagDefinitions="{Binding TagDefinitions}"
+                                                                        Style="{StaticResource HistoryWrapAwareCellTextStyle}"
+                                                                        HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn x:Name="HistorySoftwareColumn" Header="Software" Binding="{Binding Software, Converter={StaticResource WrapOpportunityConverter}}" Width="120" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryStartColumn" Header="Start" Binding="{Binding Start}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryEndColumn" Header="End" Binding="{Binding End}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTemplateColumn x:Name="HistoryDurationColumn" Header="Duration" Width="96">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <StackPanel VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Left"
+                                                        VerticalAlignment="Center">
+                                                <Path Data="{StaticResource Icon.TimeOverlap}"
+                                                      Stroke="{StaticResource DangerBrush}"
+                                                      StrokeThickness="1.75"
+                                                      StrokeStartLineCap="Round"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      Stretch="Uniform"
+                                                      SnapsToDevicePixels="True"
+                                                      Width="10"
+                                                      Height="10"
+                                                      Margin="0,0,4,0"
+                                                      ToolTip="This entry overlaps another tracked time interval">
+                                                    <Path.Style>
+                                                        <Style TargetType="Path">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding HasTimeOverlap}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Path.Style>
+                                                </Path>
+                                                <TextBlock Text="{Binding Duration}" FontFamily="Consolas" FontSize="12"
+                                                           HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Text="{Binding ExcludedDuration}" FontFamily="Consolas"
+                                                       FontSize="8" Foreground="{StaticResource ContentTertiaryBrush}"
+                                                       HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding HasExcludedTime}" Value="False">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn x:Name="HistoryPaymentColumn" Header="Payment" Binding="{Binding Payment}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryStatusColumn" Header="Status" Binding="{Binding Status}" Width="90" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Clients &amp; projects">
+                <Grid Margin="24,20,24,24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Margin="0,0,0,16">
+                        <TextBlock Text="Clients &amp; Projects" Style="{StaticResource PageTitleTextStyle}" />
+                        <TextBlock Text="Organize clients, projects, tasks, tags, software labels, and recognition rules" Style="{StaticResource PageDescriptionTextStyle}" />
+                    </StackPanel>
+                <TabControl x:Name="ManagementTabs" Grid.Row="1"
+                            SelectionChanged="ManagementTabs_SelectionChanged">
+                    <TabItem Header="Clients">
+                        <Grid Margin="14">
+                            <ListBox x:Name="ClientsGrid" PreviewMouseRightButtonDown="SelectListItemOnRightClick"
+                                     MouseDoubleClick="ClientsGrid_MouseDoubleClick"
+                                     ContextMenuOpening="ClientsGrid_ContextMenuOpening"
+                                     Background="Transparent" BorderBrush="Transparent"
+                                     BorderThickness="0" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <ListBox.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add client…" Tag="EmptyOnly" Click="AddClient_Click" />
+                                        <MenuItem Header="Rename…" Tag="ClientOnly" Click="RenameClient_Click" />
+                                        <Separator Tag="ClientOnly" />
+                                        <MenuItem Header="Remove" Tag="ClientOnly" Click="ArchiveClient_Click" />
+                                    </ContextMenu>
+                                </ListBox.ContextMenu>
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="Foreground" Value="{StaticResource InkBrush}" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderLightBrush}" />
+                                        <Setter Property="BorderThickness" Value="0,0,0,1" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="ItemBorder" Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}">
+                                                        <ContentPresenter HorizontalAlignment="Stretch" />
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsSelected" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource SelectionBrush}" />
+                                                        </Trigger>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource HoverBrush}" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Expander IsExpanded="False" HorizontalContentAlignment="Stretch"
+                                                  Foreground="{StaticResource InkBrush}">
+                                            <Expander.Template>
+                                                <ControlTemplate TargetType="Expander">
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="36" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <ToggleButton x:Name="HeaderToggle" Grid.Row="0" Focusable="False"
+                                                                      IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                                            <ToggleButton.Template>
+                                                                <ControlTemplate TargetType="ToggleButton">
+                                                                    <Border Background="Transparent" Padding="15,0">
+                                                                        <Path x:Name="Chevron" Data="M 1 0 L 6 5 L 1 10"
+                                                                              Stroke="{StaticResource MutedBrush}" StrokeThickness="1.7"
+                                                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                              Width="7" Height="11" HorizontalAlignment="Left"
+                                                                              VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsChecked" Value="True">
+                                                                            <Setter TargetName="Chevron" Property="Data" Value="M 0 1 L 5 6 L 10 1" />
+                                                                            <Setter TargetName="Chevron" Property="Width" Value="11" />
+                                                                            <Setter TargetName="Chevron" Property="Height" Value="7" />
+                                                                        </Trigger>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource InkBrush}" />
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </ToggleButton.Template>
+                                                        </ToggleButton>
+                                                        <ContentPresenter Grid.Row="0" ContentSource="Header" Margin="38,0,12,0"
+                                                                          VerticalAlignment="Center" IsHitTestVisible="False" />
+                                                        <ContentPresenter x:Name="ExpandedContent" Grid.Row="1" ContentSource="Content"
+                                                                          Visibility="Collapsed" />
+                                                    </Grid>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsExpanded" Value="True">
+                                                            <Setter TargetName="ExpandedContent" Property="Visibility" Value="Visible" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Expander.Template>
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource InkBrush}"
+                                                               FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                                                    <Border Background="{StaticResource StateRestBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                                            BorderThickness="1" CornerRadius="7" Padding="8,2" Margin="10,0,0,0">
+                                                        <TextBlock Text="{Binding ProjectCount}" Foreground="{StaticResource MutedBrush}"
+                                                                   FontSize="11" />
+                                                    </Border>
+                                                </StackPanel>
+                                            </Expander.Header>
+                                            <Border Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}" Margin="32,0,12,10" Padding="10,7">
+                                                <Grid>
+                                                    <ItemsControl ItemsSource="{Binding Projects}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid Margin="3,5" Background="Transparent"
+                                                                      MouseLeftButtonDown="ClientProject_MouseLeftButtonDown">
+                                                                    <Grid.ContextMenu>
+                                                                        <ContextMenu>
+                                                                            <MenuItem Header="Edit project…" Click="EditClientProject_Click" />
+                                                                            <MenuItem Header="Rename…" Click="RenameClientProject_Click" />
+                                                                            <MenuItem Header="Change color…" Click="ChangeClientProjectColor_Click" />
+                                                                            <Separator />
+                                                                            <MenuItem Header="Remove" Click="ArchiveClientProject_Click" />
+                                                                        </ContextMenu>
+                                                                    </Grid.ContextMenu>
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto" />
+                                                                        <ColumnDefinition />
+                                                                    </Grid.ColumnDefinitions>
+                                                                    <Border Width="8" Height="8" CornerRadius="4" Background="{Binding Color}"
+                                                                            Margin="1,0,8,0" VerticalAlignment="Center" />
+                                                                    <TextBlock Grid.Column="1" Text="{Binding Name}" Foreground="{StaticResource InkBrush}"
+                                                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                    <TextBlock Text="No active projects" Foreground="{StaticResource MutedBrush}"
+                                                               FontStyle="Italic" Margin="3,5">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Projects.Count}" Value="0">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Grid>
+                                            </Border>
+                                        </Expander>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Projects">
+                        <Grid Margin="14">
+                            <DataGrid x:Name="ProjectsGrid" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="ProjectsGrid_MouseDoubleClick"
+                                      ContextMenuOpening="ProjectsGrid_ContextMenuOpening"
+                                      SelectionMode="Extended">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add project…" Tag="EmptyOnly" Click="AddProject_Click" />
+                                        <MenuItem Header="Edit…" Tag="ProjectOnly" Click="ProjectSettings_Click" />
+                                        <MenuItem Header="Rename…" Tag="ProjectOnly" Click="RenameProject_Click" />
+                                        <MenuItem Header="Change color…" Tag="ProjectOnly" Click="ChangeProjectColor_Click" />
+                                        <Separator Tag="ProjectOnly" />
+                                        <MenuItem Header="Remove" Tag="ProjectOnly" Click="ArchiveProject_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Project" Width="190">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="8" Height="8" CornerRadius="4" Background="{Binding Color}"
+                                                            Margin="0,0,8,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Name}" Foreground="{Binding Color}"
+                                                               FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="120" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Total time" Binding="{Binding TotalTime}" Width="88" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Start – last entry" Binding="{Binding ActivityDates}" Width="170" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Daily target" Binding="{Binding DailyTarget}" Width="92" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Weekly target" Binding="{Binding WeeklyTarget}" Width="96" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Monthly target" Binding="{Binding MonthlyTarget}" Width="102" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Rate" Binding="{Binding Rate}" Width="120" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Targets">
+                        <Grid Margin="14">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource SurfaceEditorBrush}"
+                                    BorderBrush="{StaticResource BorderLightBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}"
+                                    Padding="8,6" Margin="0,0,0,12">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Project" VerticalAlignment="Center" Margin="2,0,6,0" />
+                                    <ComboBox x:Name="TargetProjectCombo" Width="300"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectionChanged="TargetProjectFilterChanged" />
+                                </StackPanel>
+                            </Border>
+                            <DataGrid x:Name="CustomTargetsGrid" Grid.Row="1" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="CustomTargetsGrid_MouseDoubleClick"
+                                      ContextMenuOpening="CustomTargetsGrid_ContextMenuOpening"
+                                      SelectionMode="Single"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add target..." Tag="EmptyOnly" Click="AddCustomTarget_Click" />
+                                        <MenuItem Header="Edit..." Tag="CustomTargetOnly" Click="EditCustomTarget_Click" />
+                                        <MenuItem Header="Lower debt..." Tag="CustomTargetOnly" Click="LowerTargetDebt_Click" />
+                                        <MenuItem Header="Cancel debt" Tag="CustomTargetOnly" Click="CancelTargetDebt_Click" />
+                                        <Separator Tag="CustomTargetOnly" />
+                                        <MenuItem Header="Remove" Tag="CustomTargetOnly" Click="DeleteCustomTarget_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Target" Binding="{Binding Name}" Width="240"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="100"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Target time" Binding="{Binding TargetTime}" Width="110"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Counts" Binding="{Binding Counts}" Width="145"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Project" Binding="{Binding Project}" Width="200"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="160"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Progress" Binding="{Binding Progress}" Width="180"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Debt" Binding="{Binding Debt}" Width="190"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Tasks">
+                        <Grid Margin="14">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource SurfaceEditorBrush}"
+                                    BorderBrush="{StaticResource BorderLightBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}"
+                                    Padding="8,6" Margin="0,0,0,12">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Project" VerticalAlignment="Center" Margin="2,0,6,0" />
+                                    <ComboBox x:Name="TaskProjectCombo" Width="300"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectionChanged="TaskProjectFilterChanged" />
+                                </StackPanel>
+                            </Border>
+                            <DataGrid x:Name="TasksGrid" Grid.Row="1" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="TasksGrid_MouseDoubleClick"
+                                      ContextMenuOpening="TasksGrid_ContextMenuOpening"
+                                      SelectionMode="Extended"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add task…" Tag="EmptyOnly" Click="AddTask_Click" />
+                                        <MenuItem Header="Edit…" Tag="TaskOnly" Click="EditTasks_Click" />
+                                        <MenuItem Header="Rename…" Tag="TaskOnly" Click="RenameTask_Click" />
+                                        <MenuItem Header="Open in Trello" Tag="TrelloOnly" Click="OpenTaskInTrello_Click" />
+                                        <Separator Tag="TaskOnly" />
+                                        <MenuItem Header="Remove" Tag="TaskOnly" Click="ArchiveTask_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Task" Width="320">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Width="18" Height="18" CornerRadius="5" Margin="0,0,7,0"
+                                                            Background="#FF0C66E4" ToolTip="Linked Trello card">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsTrelloLinked}" Value="False">
+                                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="T" Foreground="White" FontSize="10" FontWeight="SemiBold"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Project" Binding="{Binding Project}" Width="260" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="220" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Total time" Binding="{Binding TotalTime}" Width="130" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Tags">
+                        <Grid Margin="14">
+                            <DataGrid x:Name="TagsGrid" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="TagsGrid_MouseDoubleClick"
+                                      ContextMenuOpening="TagsGrid_ContextMenuOpening"
+                                      SelectionMode="Extended">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add tag…" Tag="EmptyOnly" Click="AddTag_Click" />
+                                        <MenuItem Header="Edit…" Tag="TagOnly" Click="EditTags_Click" />
+                                        <MenuItem Header="Rename everywhere…" Tag="TagOnly" Click="RenameTag_Click" />
+                                        <MenuItem Header="Change color…" Tag="TagOnly" Click="ChangeTagColor_Click" />
+                                        <Separator Tag="TagOnly" />
+                                        <MenuItem Header="Remove" Tag="TagOnly" Click="DeleteTag_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Tag" Width="360">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
+                                                            Margin="0,0,9,0" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Name}" Foreground="{Binding Color}"
+                                                               FontWeight="Bold" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Project" Binding="{Binding Project}" Width="240" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="190" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Logs using tag" Binding="{Binding Usage}" Width="180" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Software">
+                        <Grid Margin="14">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource SurfaceEditorBrush}"
+                                    BorderBrush="{StaticResource BorderLightBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}"
+                                    Padding="8,6" Margin="0,0,0,12">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Project" VerticalAlignment="Center" Margin="2,0,6,0" />
+                                    <ComboBox x:Name="SoftwareProjectCombo" Width="300"
+                                              DisplayMemberPath="DisplayName"
+                                              SelectionChanged="SoftwareProjectFilterChanged" />
+                                </StackPanel>
+                            </Border>
+                            <DataGrid x:Name="SoftwareGrid" Grid.Row="1" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="SoftwareGrid_MouseDoubleClick"
+                                      ContextMenuOpening="SoftwareGrid_ContextMenuOpening"
+                                      SelectionMode="Single">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add software…" Tag="EmptyOnly" Click="AddSoftware_Click" />
+                                        <MenuItem Header="Edit…" Tag="SoftwareOnly" Click="EditSoftware_Click" />
+                                        <Separator Tag="SoftwareOnly" />
+                                        <MenuItem Header="Remove from list" Tag="SoftwareOnly" Click="RemoveSoftwareFromList_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Project" Binding="{Binding Project}" Width="190"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="150"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Label shown in logs" Binding="{Binding Label}" Width="260"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Process name" Binding="{Binding Process}" Width="220"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Tracking" Binding="{Binding TrackingBehavior}" Width="110"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTemplateColumn Header="Correlated tags" Width="300">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <controls:TagDescriptionDisplay SourceText="{Binding TagsSource}"
+                                                                                TagDefinitions="{Binding TagDefinitions}"
+                                                                                TextTrimming="CharacterEllipsis"
+                                                                                HorizontalAlignment="Left"
+                                                                                VerticalAlignment="Center" />
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Entries" Binding="{Binding Usage}" Width="140"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                    <TabItem Header="Window rules">
+                        <Grid Margin="14">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <Border Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}"
+                                    Padding="8,6" Margin="0,0,0,12">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Project" VerticalAlignment="Center" Margin="2,0,6,0" />
+                                    <ComboBox x:Name="RuleProjectCombo" Width="260" DisplayMemberPath="DisplayName"
+                                              SelectionChanged="RuleProjectFilterChanged" />
+                                </StackPanel>
+                            </Border>
+                            <DataGrid x:Name="RulesGrid" Grid.Row="1" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="RulesGrid_MouseDoubleClick"
+                                      ContextMenuOpening="RulesGrid_ContextMenuOpening"
+                                      SelectionMode="Extended">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add rule…" Tag="EmptyOnly" Click="AddRule_Click" />
+                                        <MenuItem Header="Edit…" Tag="RuleOnly" Click="EditRule_Click" />
+                                        <Separator Tag="RuleOnly" />
+                                        <MenuItem Header="Remove" Tag="RuleOnly" Click="DeleteRule_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.GroupStyle>
+                                    <GroupStyle>
+                                        <GroupStyle.ContainerStyle>
+                                            <Style TargetType="{x:Type GroupItem}">
+                                                <Setter Property="Template">
+                                                    <Setter.Value>
+                                                        <ControlTemplate TargetType="{x:Type GroupItem}">
+                                                            <StackPanel>
+                                                                <Border Background="{StaticResource SurfaceEditorBrush}"
+                                                                        BorderBrush="{StaticResource BorderLightBrush}"
+                                                                        BorderThickness="0,1,0,1"
+                                                                        Padding="8,6" Margin="0,8,0,0">
+                                                                    <TextBlock Text="{Binding Name}" FontSize="12"
+                                                                               FontWeight="SemiBold"
+                                                                               VerticalAlignment="Center" />
+                                                                </Border>
+                                                                <ItemsPresenter />
+                                                            </StackPanel>
+                                                        </ControlTemplate>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </GroupStyle.ContainerStyle>
+                                    </GroupStyle>
+                                </DataGrid.GroupStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Title contains" Binding="{Binding TitlePattern}" Width="*" MinWidth="360" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Application" Binding="{Binding Process}" Width="220" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
+                    </TabItem>
+                </TabControl>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Reports">
+                <Grid Margin="24,20,24,24">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Margin="0,0,0,16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Reports" Style="{StaticResource PageTitleTextStyle}" />
+                            <TextBlock Text="Monthly by default · filter, drill down, and mark work as paid" Style="{StaticResource PageDescriptionTextStyle}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                            <Button x:Name="ReportSaveViewButton"
+                                    Content="Save Current View"
+                                    Visibility="Collapsed"
+                                    Click="ReportSaveView_Click" />
+                            <Button x:Name="ReportColumnsButton"
+                                    Style="{StaticResource IconButton}"
+                                    Margin="8,0,0,0"
+                                    Click="ReportColumns_Click"
+                                    ToolTip="Reports view settings"
+                                    AutomationProperties.Name="Reports view settings">
+                                <Path Data="{StaticResource Icon.Menu}"
+                                      Style="{StaticResource ChromeIconPathStyle}" />
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Columns" Tag="ReportColumnsSubmenu" />
+                                        <Separator />
+                                        <MenuItem Header="Restore default" Click="ReportRestoreDefaultView_Click" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                    <DockPanel Grid.Row="1" Margin="0,0,0,12">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Content="Refresh" Click="RefreshReport_Click" />
+                            <Button Content="Export CSV" Style="{StaticResource PrimaryButton}" Click="ExportCsv_Click" />
+                        </StackPanel>
+                        <WrapPanel>
+                            <TextBlock Text="Date" VerticalAlignment="Center" Margin="0,0,5,0" />
+                            <controls:DateRangePicker x:Name="ReportRangePicker" Width="285"
+                                                      RangeChanged="ReportDateRangeChanged" />
+                            <Button x:Name="ReportThisMonthButton"
+                                    Content="This month"
+                                    Tag="ThisMonth"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="8,0,4,4"
+                                    Click="ReportDateRangeShortcut_Click" />
+                            <Button x:Name="ReportThisWeekButton"
+                                    Content="This week"
+                                    Tag="ThisWeek"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="0,0,4,4"
+                                    Click="ReportDateRangeShortcut_Click" />
+                            <Button x:Name="ReportTodayButton"
+                                    Content="Today"
+                                    Tag="Today"
+                                    Style="{StaticResource DateRangeShortcutButtonStyle}"
+                                    Margin="0,0,4,4"
+                                    Click="ReportDateRangeShortcut_Click" />
+                        </WrapPanel>
+                    </DockPanel>
+                    <Border Grid.Row="2" Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                            BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}" Padding="8,6" Margin="0,0,0,12">
+                        <WrapPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                                <TextBlock Text="Client" VerticalAlignment="Center" Margin="2,0,4,0" />
+                                <ComboBox x:Name="ReportClientCombo" Width="120" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="ReportFilterChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                                <TextBlock Text="Project" VerticalAlignment="Center" Margin="2,0,4,0" />
+                                <ComboBox x:Name="ReportProjectCombo" Width="145" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="ReportFilterChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                                <TextBlock Text="Task" VerticalAlignment="Center" Margin="2,0,4,0" />
+                                <ComboBox x:Name="ReportTaskCombo" Width="125" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="ReportFilterChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,6,0">
+                                <TextBlock Text="Tag" VerticalAlignment="Center" Margin="2,0,4,0" />
+                                <ComboBox x:Name="ReportTagCombo" Width="110" SelectionChanged="ReportFilterChanged">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding DisplayName}" Foreground="{Binding Color}" FontWeight="Bold" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Payment" VerticalAlignment="Center" Margin="2,0,4,0" />
+                                <ComboBox x:Name="ReportPaidCombo" Width="115" DisplayMemberPath="DisplayName"
+                                          SelectionChanged="ReportFilterChanged" />
+                            </StackPanel>
+                        </WrapPanel>
+                    </Border>
+                    <Grid x:Name="ReportVisualsGrid" Grid.Row="3" MinHeight="420">
+                        <Grid.RowDefinitions>
+                            <RowDefinition x:Name="ReportVisualsTopRow" Height="*" />
+                            <RowDefinition x:Name="ReportVisualsGapRow" Height="0" />
+                            <RowDefinition x:Name="ReportVisualsBottomRow" Height="0" />
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition x:Name="ReportTableColumn" Width="*" />
+                            <ColumnDefinition x:Name="ReportGapColumn" Width="12" />
+                            <ColumnDefinition x:Name="ReportChartColumn" Width="360" />
+                        </Grid.ColumnDefinitions>
+                        <ScrollViewer x:Name="ReportSummaryColumn" Grid.Column="2"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      CanContentScroll="False">
+                        <StackPanel>
+                        <Border x:Name="ReportChartCard" Height="276" Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource Radius.Card}" Padding="12">
+                            <TabControl x:Name="ReportChartTabs">
+                                <TabItem Header="Projects">
+                                    <Grid Margin="4,4,4,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Project share" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="ReportChartRangeText" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="11" Margin="0,3,0,5" />
+                                        </StackPanel>
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="170" />
+                                                <ColumnDefinition />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Width="160" Height="160" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                <Image x:Name="ReportDonutImage" Width="160" Height="160" Stretch="None" />
+                                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="ReportDonutTotalHours" Text="0:00 h" FontSize="21"
+                                                               FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="total" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Auto" Margin="5,0,0,0">
+                                                <ItemsControl x:Name="ReportLegendItems">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,4">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
+                                                                        Margin="0,3,7,0" VerticalAlignment="Top" />
+                                                                <StackPanel Grid.Column="1">
+                                                                    <TextBlock Text="{Binding Project}" FontWeight="SemiBold"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding LegendDetail}" Foreground="{StaticResource MutedBrush}"
+                                                                               FontSize="11" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
+                                <TabItem Header="Clients">
+                                    <Grid Margin="4,4,4,0">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition />
+                                        </Grid.RowDefinitions>
+                                        <StackPanel>
+                                            <TextBlock Text="Client share" FontSize="15" FontWeight="SemiBold" />
+                                            <TextBlock x:Name="ReportClientChartRangeText" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="11" Margin="0,3,0,5" />
+                                        </StackPanel>
+                                        <Grid Grid.Row="1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="170" />
+                                                <ColumnDefinition />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid Width="160" Height="160" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                <Image x:Name="ReportClientDonutImage" Width="160" Height="160" Stretch="None" />
+                                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <TextBlock x:Name="ReportClientDonutTotalHours" Text="0:00 h" FontSize="21"
+                                                               FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="month" Foreground="{StaticResource MutedBrush}"
+                                                               FontSize="11" HorizontalAlignment="Center" />
+                                                </StackPanel>
+                                            </Grid>
+                                            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Auto" Margin="5,0,0,0">
+                                                <ItemsControl x:Name="ReportClientLegendItems">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,4">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                    <ColumnDefinition />
+                                                                </Grid.ColumnDefinitions>
+                                                                <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
+                                                                        Margin="0,3,7,0" VerticalAlignment="Top" />
+                                                                <StackPanel Grid.Column="1">
+                                                                    <TextBlock Text="{Binding Client}" FontWeight="SemiBold"
+                                                                               TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding LegendDetail}" Foreground="{StaticResource MutedBrush}"
+                                                                               FontSize="11" />
+                                                                </StackPanel>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
+                            </TabControl>
+                        </Border>
+                        <Border x:Name="ReportInclusiveChartCard" Height="246" Margin="0,12,0,0"
+                                Background="{StaticResource SurfaceEditorBrush}"
+                                BorderBrush="{StaticResource BorderLightBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource Radius.Card}" Padding="16,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Project share · time including short idle"
+                                               FontSize="15" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="ReportInclusiveChartRangeText"
+                                               Foreground="{StaticResource MutedBrush}"
+                                               FontSize="11" Margin="0,3,0,5" />
+                                </StackPanel>
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid Width="140" Height="140" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                        <Image x:Name="ReportInclusiveDonutImage" Width="140" Height="140" Stretch="Uniform" />
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <TextBlock x:Name="ReportInclusiveDonutTotalHours" Text="0:00 h"
+                                                       FontSize="19" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                                            <TextBlock Text="time + idle" Foreground="{StaticResource MutedBrush}"
+                                                       FontSize="11" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto"
+                                                  HorizontalScrollBarVisibility="Auto" Margin="5,0,0,0">
+                                        <ItemsControl x:Name="ReportInclusiveLegendItems">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,4">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition />
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
+                                                                Margin="0,3,7,0" VerticalAlignment="Top" />
+                                                        <StackPanel Grid.Column="1">
+                                                            <TextBlock Text="{Binding Project}" FontWeight="SemiBold"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding TotalWithShortIdle}" Foreground="{StaticResource MutedBrush}"
+                                                                       FontSize="11" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Border x:Name="ReportTargetsCard" Margin="0,12,0,0" MinHeight="220"
+                                Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                                BorderThickness="1" CornerRadius="{StaticResource Radius.Card}" Padding="12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="Monthly targets" FontSize="13" FontWeight="SemiBold" Margin="4,0,4,5" />
+                                <ListBox x:Name="ReportTargetsList" Grid.Row="1"
+                                         Style="{StaticResource ReportTargetsListStyle}"
+                                         ItemTemplate="{StaticResource SidebarTargetRowTemplate}"
+                                         PreviewMouseRightButtonDown="SelectTargetOnRightClick"
+                                         MouseDoubleClick="TargetsList_MouseDoubleClick"
+                                         ContextMenuOpening="RequireTargetSelection_ContextMenuOpening">
+                                    <ListBox.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Edit target..." Click="EditTargetProject_Click" />
+                                            <MenuItem Header="Lower debt..." Click="LowerTargetDebt_Click" />
+                                            <MenuItem Header="Cancel debt" Click="CancelTargetDebt_Click" />
+                                        </ContextMenu>
+                                    </ListBox.ContextMenu>
+                                </ListBox>
+                                <TextBlock Grid.Row="2" Text="No monthly targets set" Margin="4,3,4,2"
+                                           Foreground="{StaticResource ContentTertiaryBrush}" FontSize="11" FontStyle="Italic">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ElementName=ReportTargetsList, Path=HasItems}" Value="False">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </Border>
+                        </StackPanel>
+                        </ScrollViewer>
+                        <ListBox x:Name="ReportGrid" Grid.Column="0"
+                                 SelectionMode="Single"
+                                 ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                 PreviewMouseRightButtonDown="SelectReportProjectOnRightClick"
+                                 SelectionChanged="ReportGrid_SelectionChanged"
+                                 MouseDoubleClick="ReportGrid_MouseDoubleClick"
+                                 ContextMenuOpening="RequireReportProjectSelection_ContextMenuOpening">
+                            <ListBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Edit project…" Click="EditReportProject_Click" />
+                                    <Separator />
+                                    <MenuItem Header="Show" Click="ShowReportProject_Click" />
+                                    <Separator />
+                                    <MenuItem Header="Set as paid" Click="SetReportProjectPaid_Click" />
+                                </ContextMenu>
+                            </ListBox.ContextMenu>
+                            <ListBox.ItemContainerStyle>
+                                <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                                    <Setter Property="Padding" Value="0" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="ListBoxItem">
+                                                <Border x:Name="ReportProjectContainerSurface"
+                                                        Background="Transparent"
+                                                        Padding="{TemplateBinding Padding}">
+                                                    <ContentPresenter Content="{TemplateBinding Content}"
+                                                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                                      ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}"
+                                                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                                                </Border>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </ListBox.ItemContainerStyle>
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="8,0,8,16">
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <Border Padding="8,10,8,8">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Project}" Foreground="{StaticResource InkBrush}"
+                                                           FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <Ellipse Width="5" Height="5" Margin="9,1,9,0" VerticalAlignment="Center"
+                                                         Fill="{StaticResource ProjectClientDotBrush}" />
+                                                <TextBlock Text="{Binding Client}" Foreground="{StaticResource ProjectClientTextBrush}"
+                                                           FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                        </Border>
+                                        <DataGrid Grid.Row="1" ItemsSource="{Binding Tasks}" Margin="24,0,0,0"
+                                                  RowHeight="31" ColumnHeaderHeight="31"
+                                                  SelectionMode="Single" SelectionUnit="FullRow"
+                                                  Loaded="ReportTaskGrid_Loaded"
+                                                  PreviewMouseLeftButtonUp="ReportTaskGrid_PreviewMouseLeftButtonUp"
+                                                  PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                                  SelectionChanged="ReportTaskGrid_SelectionChanged"
+                                                  MouseDoubleClick="ReportTaskGrid_MouseDoubleClick"
+                                                  ContextMenuOpening="ReportTaskGrid_ContextMenuOpening"
+                                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                  ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                            <DataGrid.Resources>
+                                                <ContextMenu x:Key="ReportColumnHeaderMenu" x:Shared="False"
+                                                             DataContext="{Binding PlacementTarget.Column, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Hide column" Click="ReportHideColumn_Click" />
+                                                </ContextMenu>
+                                            </DataGrid.Resources>
+                                            <DataGrid.ColumnHeaderStyle>
+                                                <Style TargetType="{x:Type DataGridColumnHeader}"
+                                                       BasedOn="{StaticResource {x:Type DataGridColumnHeader}}">
+                                                    <Setter Property="ContextMenu" Value="{StaticResource ReportColumnHeaderMenu}" />
+                                                </Style>
+                                            </DataGrid.ColumnHeaderStyle>
+                                            <DataGrid.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Edit task…" Tag="SavedTaskOnly" Click="EditReportTask_Click" />
+                                                    <Separator Tag="SavedTaskOnly" />
+                                                    <MenuItem Header="Show" Click="ShowReportTask_Click" />
+                                                    <Separator />
+                                                    <MenuItem Header="Set as paid" Click="SetReportTaskPaid_Click" />
+                                                </ContextMenu>
+                                            </DataGrid.ContextMenu>
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Task" Binding="{Binding Task}" Width="220" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                                <DataGridTextColumn Header="Time" Binding="{Binding TotalTime}" Width="82" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                                <DataGridTextColumn Header="Time + idle" Binding="{Binding TotalWithShortIdle}" Width="96" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                                <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="112" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                                <DataGridTextColumn Header="Logs" Binding="{Binding Entries}" Width="72" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <Border Grid.Row="2" Margin="24,0,0,0"
+                                                BorderBrush="{StaticResource StrongBorderBrush}"
+                                                BorderThickness="0,2,0,0" Padding="0,8,0,0">
+                                            <Grid MinHeight="28" Tag="ReportSummaryFooter"
+                                                  Loaded="ReportSummaryGrid_Loaded">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="220" />
+                                                    <ColumnDefinition Width="82" />
+                                                    <ColumnDefinition Width="96" />
+                                                    <ColumnDefinition Width="112" />
+                                                    <ColumnDefinition Width="72" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Grid.Column="0" Text="Project total" Margin="8,0"
+                                                           Foreground="{StaticResource ContentSecondaryBrush}"
+                                                           FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="{Binding TotalTime}" Margin="8,0"
+                                                           FontFamily="Consolas" FontWeight="SemiBold"
+                                                           Style="{StaticResource DataGridCellTextStyle}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding TotalWithShortIdle}" Margin="8,0"
+                                                           FontFamily="Consolas" FontWeight="SemiBold"
+                                                           Style="{StaticResource DataGridCellTextStyle}" />
+                                                <TextBlock Grid.Column="3" Text="{Binding Value}" Margin="8,0"
+                                                           FontWeight="SemiBold" Style="{StaticResource DataGridCellTextStyle}" />
+                                                <TextBlock Grid.Column="4" Text="{Binding Entries}" Margin="8,0"
+                                                           Style="{StaticResource DataGridCellTextStyle}" />
+                                            </Grid>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Settings">
+                <ScrollViewer VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled"
+                              CanContentScroll="False">
+                <StackPanel Margin="32,24" MaxWidth="768" HorizontalAlignment="Center">
+                    <TextBlock Text="Settings" Style="{StaticResource PageTitleTextStyle}" />
+                    <CheckBox x:Name="RecognitionCheck" Margin="0,24,0,8" Content="Recognize configured projects from active window titles"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="RecognitionCheck_Changed" Unchecked="RecognitionCheck_Changed" />
+                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                Text="Window titles are matched in memory and unknown titles are never stored. The app has no telemetry; network access occurs only for Trello or Google Sheets connections configured in this profile." />
+                    <TextBlock Text="Continue a matching recent entry when the gap is shorter than"
+                               FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="RecentEntryResumeMinutesText"
+                                 Width="88"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="RecentEntryResumeMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="RecentEntryResumeMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 0 to 1440; 0 disables this behavior"
+                                 AutomationProperties.Name="Maximum gap for continuing a matching recent entry in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="When the immediately previous unpaid entry has the same project, task, description, and tags, starting again inside this gap reopens that entry and counts the gap as tracked time. Set 0 to always create a new entry."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="RecentEntryResumeValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
+                    <TextBlock Text="When Windows locks, signs out, or sleeps" FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <ComboBox x:Name="SessionBehaviorCombo"
+                              SelectionChanged="SessionBehaviorCombo_SelectionChanged"
+                              AutomationProperties.Name="Timer behavior when Windows is unavailable">
+                        <ComboBoxItem Content="Stop the running timer" />
+                        <ComboBoxItem Content="Keep running and review unavailable time" />
+                    </ComboBox>
+                    <TextBlock x:Name="SessionBehaviorDescriptionText"
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock Text="Idle protection" FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <CheckBox x:Name="CallsIdleProtectionCheck"
+                              Margin="0,0,0,8"
+                              Content="Treat calls and sustained foreground audio as activity"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="CallsIdleProtectionCheck_Changed"
+                              Unchecked="CallsIdleProtectionCheck_Changed" />
+                    <TextBlock Text="Protects listen-only calls through communications-render audio. If an app does not identify a call, its foreground render audio qualifies after 10 continuous seconds; background ordinary audio and explicit music are ignored."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                    <CheckBox x:Name="VideoIdleProtectionCheck"
+                              Margin="0,16,0,8"
+                              Content="Treat playing video as activity"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="VideoIdleProtectionCheck_Changed"
+                              Unchecked="VideoIdleProtectionCheck_Changed" />
+                    <TextBlock Text="Protects playing Windows media sessions reported as video or unclassified media. Sessions explicitly reported as music or images are ignored."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                    <Border Margin="0,16,0,0" Padding="12,8"
+                            Background="{StaticResource StateHoverBrush}"
+                            CornerRadius="10">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse x:Name="IdleProtectionStatusDot" Width="7" Height="7"
+                                     Margin="0,0,9,0" VerticalAlignment="Center"
+                                     Fill="{StaticResource ContentTertiaryBrush}" />
+                            <TextBlock x:Name="IdleProtectionStatusText"
+                                       Text="Idle protection is starting…"
+                                       Foreground="{StaticResource ContentSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock x:Name="IdleProtectionPrivacyText"
+                               Text="Output-only detection — microphone activity is never accessed. No audio sessions, processes, media metadata, or protection history are stored."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,8,0,0" />
+                    <TextBlock Text="Review excluded software after" FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="ExcludedSoftwareReviewMinutesText"
+                                 Width="88"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="ExcludedSoftwareReviewMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="ExcludedSoftwareReviewMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 1 to 1440"
+                                 AutomationProperties.Name="Excluded software review threshold in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="Separate visits are summed for each excluded app. After this total is reached, the app asks once per app and applies that decision to later visits during the same running entry."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="ExcludedSoftwareReviewValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
+                    <TextBlock Text="Review accumulated short idle time after" FontWeight="SemiBold" Margin="0,24,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="AccumulatedAwayReviewMinutesText"
+                                 Width="88"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="AccumulatedAwayReviewMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="AccumulatedAwayReviewMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 1 to 1440"
+                                 AutomationProperties.Name="Accumulated short idle review threshold in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="Only idle intervals shorter than 5 minutes are combined while tracking. They carry across entries, but only time within the previous 4 hours is counted; older time expires automatically. After No, the next reminder is at 3x the threshold and then at every following multiple."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="AccumulatedAwayReviewValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
+                    <TextBlock Text="Include short idle in reports and eligible targets up to"
+                               FontWeight="SemiBold" Margin="0,24,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="ShortIdleReportingMinutesText"
+                                 Width="88"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="ShortIdleReportingMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="ShortIdleReportingMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 1 to 60"
+                                 AutomationProperties.Name="Maximum short idle interval included in reports and targets, in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="The Time + idle report metric adds back each excluded idle interval no longer than this limit. Longer idle intervals stay excluded. Targets can choose this metric individually."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="ShortIdleReportingValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
+                    <CheckBox x:Name="TargetReviewNotificationCheck" Margin="0,28,0,8"
+                              Content="Show scheduled weekly and monthly target review"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="TargetReviewNotificationCheck_Changed"
+                              Unchecked="TargetReviewNotificationCheck_Changed" />
+                    <TextBlock Text="Shows one compact reminder on the selected weekday and week of the month when any project has a weekly or monthly target, including carried target debt."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                    <StackPanel x:Name="TargetReviewSchedulePanel" Margin="0,12,0,0">
+                        <TextBlock Text="Day of week" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <WrapPanel>
+                            <RadioButton x:Name="TargetReviewMonday" Content="Mon" Tag="Monday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewTuesday" Content="Tue" Tag="Tuesday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewWednesday" Content="Wed" Tag="Wednesday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewThursday" Content="Thu" Tag="Thursday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewFriday" Content="Fri" Tag="Friday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewSaturday" Content="Sat" Tag="Saturday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                            <RadioButton x:Name="TargetReviewSunday" Content="Sun" Tag="Sunday" GroupName="TargetReviewDay"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewDay_Changed" />
+                        </WrapPanel>
+                        <TextBlock Text="Week in month" FontWeight="SemiBold" Margin="0,8,0,6" />
+                        <WrapPanel>
+                            <RadioButton x:Name="TargetReviewFirstWeek" Content="First" Tag="First" GroupName="TargetReviewMonthWeek"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewMonthWeek_Changed" />
+                            <RadioButton x:Name="TargetReviewSecondWeek" Content="Second" Tag="Second" GroupName="TargetReviewMonthWeek"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewMonthWeek_Changed" />
+                            <RadioButton x:Name="TargetReviewPenultimateWeek" Content="Penultimate" Tag="Penultimate" GroupName="TargetReviewMonthWeek"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewMonthWeek_Changed" />
+                            <RadioButton x:Name="TargetReviewLastWeek" Content="Last" Tag="Last" GroupName="TargetReviewMonthWeek"
+                                         Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewMonthWeek_Changed" />
+                        </WrapPanel>
+                    </StackPanel>
+                    <TextBlock Text="Trello" FontSize="18" FontWeight="SemiBold" Margin="0,30,0,4" />
+                    <TextBlock Text="Read-only task synchronization for this profile"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+                    <Border Padding="14" Background="{StaticResource SurfaceEditorBrush}"
+                            BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource Radius.Navigation}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock x:Name="TrelloConnectionText" Text="Not connected" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="TrelloSyncStatusText" Margin="0,3,0,0"
+                                               Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                               Text="Connect Trello to import assigned cards." />
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                                    <Button x:Name="TrelloConnectButton" Content="Connect" Click="TrelloConnect_Click" />
+                                    <Button x:Name="TrelloSyncButton" Content="Sync now" Click="TrelloSync_Click" IsEnabled="False" />
+                                    <Button x:Name="TrelloDisconnectButton" Content="Disconnect" Click="TrelloDisconnect_Click" IsEnabled="False" />
+                                </StackPanel>
+                            </Grid>
+                            <DataGrid x:Name="TrelloMappingsGrid" Height="190" Margin="0,14,0,0"
+                                      PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      MouseDoubleClick="TrelloMappingsGrid_MouseDoubleClick"
+                                      ContextMenuOpening="TrelloMappingsGrid_ContextMenuOpening"
+                                      SelectionMode="Single" ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Add mapping…" Tag="EmptyOnly" Click="AddTrelloMapping_Click" />
+                                        <MenuItem Header="Edit…" Tag="TrelloMappingOnly" Click="EditTrelloMapping_Click" />
+                                        <Separator Tag="TrelloMappingOnly" />
+                                        <MenuItem Header="Remove" Tag="TrelloMappingOnly" Click="RemoveTrelloMapping_Click" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Board" Binding="{Binding Board}" Width="170"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Project" Binding="{Binding Project}" Width="150"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Client" Binding="{Binding Client}" Width="130"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Lists" Binding="{Binding Lists}" Width="260"
+                                                        ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock Margin="2,10,2,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                       Text="Only open cards assigned to the connected account in selected lists are read. Tokens are kept in Windows Credential Manager; card descriptions, labels, comments, and activity history are not stored." />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="Google Sheets" FontSize="18" FontWeight="SemiBold" Margin="0,30,0,4" />
+                    <TextBlock Text="Optional per-profile daily log backup"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
+                    <Border Padding="14" Background="{StaticResource SurfaceEditorBrush}"
+                            BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource Radius.Navigation}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock x:Name="GoogleSheetsConnectionText" Text="Not connected" FontWeight="SemiBold" />
+                                    <TextBlock x:Name="GoogleSheetsSyncStatusText" Margin="0,3,0,0"
+                                               Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                               Text="Daily CSV exports are stored locally." />
+                                </StackPanel>
+                                <WrapPanel Grid.Column="1" VerticalAlignment="Top">
+                                    <Button x:Name="GoogleSheetsConnectButton" Content="Connect" Click="GoogleSheetsConnect_Click" />
+                                    <Button x:Name="GoogleSheetsSyncButton" Content="Sync now" Click="GoogleSheetsSync_Click" IsEnabled="False" />
+                                    <Button x:Name="GoogleSheetsOpenButton" Content="Open spreadsheet" Click="GoogleSheetsOpen_Click" IsEnabled="False" />
+                                    <Button x:Name="GoogleSheetsDisconnectButton" Content="Disconnect" Click="GoogleSheetsDisconnect_Click" IsEnabled="False" />
+                                </WrapPanel>
+                            </Grid>
+                            <CheckBox x:Name="GoogleSheetsCloudExportCheck" Margin="0,14,0,4"
+                                      Content="Store daily log exports in Google Sheets instead of local CSV files"
+                                      Style="{StaticResource ToggleSwitchStyle}" IsEnabled="False"
+                                      Checked="GoogleSheetsCloudExportCheck_Changed"
+                                      Unchecked="GoogleSheetsCloudExportCheck_Changed" />
+                            <TextBlock Margin="2,7,2,0" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap"
+                                       Text="A separate YYYY-MM-DD worksheet is used for each day. Entries explicitly deleted in Log O'clock are removed from Google Sheets; remote-only rows without a recorded local deletion are retained as recovery candidates. Sheets is a readable entry mirror, not an automatic database restore. The operational SQLite database and automatic daily database snapshots remain local so timers keep working offline. Google is contacted only when this profile is connected; OAuth secrets stay in Windows Credential Manager." />
+                        </StackPanel>
+                    </Border>
+                    <CheckBox x:Name="AutostartCheck" Margin="0,24,0,8" Content="Launch Log O'clock when I sign in"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="AutostartCheck_Changed" Unchecked="AutostartCheck_Changed" />
+                    <TextBlock Text="Storage folder" FontWeight="SemiBold" Margin="0,28,0,5" />
+                    <TextBox x:Name="DatabasePathText" IsReadOnly="True" />
+                    <TextBlock Text="Active data is kept in TimeTracker.db. Safety snapshots are saved under Daily Backups. Local mode writes one CSV per day under Daily Logs and retains older revisions; Google Sheets mode sends those daily log exports to one worksheet per day. Existing monthly CSV files remain compatible."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock Text="Closing the main window keeps the tracker running in the system tray. Use Exit from the tray menu to stop it completely."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,24,0,0" />
+                    <TextBlock Text="About" FontSize="18" FontWeight="SemiBold" Margin="0,30,0,4" />
+                    <TextBlock x:Name="AboutProductText" Text="Log O'clock" FontWeight="SemiBold" />
+                    <TextBlock x:Name="AboutAuthorText" Text="Created by Zachariasz Jędrzejczyk"
+                               Foreground="{StaticResource MutedBrush}" Margin="0,3,0,24" />
+                </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+
+        <Border x:Name="SidebarTargetsPanel" Grid.Row="2" Width="275" Height="312" MinHeight="96"
+                HorizontalAlignment="Left" VerticalAlignment="Bottom" Panel.ZIndex="2"
+                Background="{StaticResource SurfaceSidebarBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                BorderThickness="0,1,1,0" Padding="12,0,12,10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Thumb x:Name="SidebarTargetsResizeThumb"
+                       Grid.Row="0"
+                       Margin="-12,0,-12,0"
+                       Style="{StaticResource SidebarTargetsResizeThumbStyle}"
+                       DragStarted="SidebarTargetsResizeThumb_DragStarted"
+                       DragDelta="SidebarTargetsResizeThumb_DragDelta"
+                       DragCompleted="SidebarTargetsResizeThumb_DragCompleted"
+                       ToolTip="Drag to resize targets"
+                       AutomationProperties.Name="Resize sidebar targets panel" />
+                <Grid Grid.Row="1" Margin="4,0,4,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="TARGETS" Foreground="{StaticResource ContentTertiaryBrush}"
+                               FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="D / W / M / 1×" Foreground="{StaticResource ContentTertiaryBrush}"
+                               FontSize="9" VerticalAlignment="Center" />
+                </Grid>
+                <ListBox x:Name="TargetsGrid" Grid.Row="2" MinHeight="0" Tag="SidebarTargetRing"
+                         Style="{StaticResource SidebarTargetsListStyle}"
+                         ItemTemplate="{StaticResource SidebarTargetRowTemplate}"
+                         PreviewMouseRightButtonDown="SelectTargetOnRightClick"
+                         MouseDoubleClick="TargetsList_MouseDoubleClick"
+                         ContextMenuOpening="RequireTargetSelection_ContextMenuOpening">
+                    <ListBox.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Edit target..." Click="EditTargetProject_Click" />
+                            <MenuItem Header="Lower debt..." Click="LowerTargetDebt_Click" />
+                            <MenuItem Header="Cancel debt" Click="CancelTargetDebt_Click" />
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
+                </ListBox>
+                <TextBlock Grid.Row="3" Text="No targets set" Margin="4,3,4,2"
+                           Foreground="{StaticResource ContentTertiaryBrush}" FontSize="11" FontStyle="Italic">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ElementName=TargetsGrid, Path=HasItems}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+        </Border>
+    </Grid>
+    </Border>
+</Window>

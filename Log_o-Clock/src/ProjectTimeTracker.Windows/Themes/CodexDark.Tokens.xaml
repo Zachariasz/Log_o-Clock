@@ -1,0 +1,122 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!-- Codex dark semantic seed -->
+    <Color x:Key="Color.Surface.Under">#FF000000</Color>
+    <Color x:Key="Color.Surface.App">#FF181818</Color>
+    <Color x:Key="Color.Surface.Sidebar">#FF1D1D1D</Color>
+    <Color x:Key="Color.Surface.Editor">#FF212121</Color>
+    <Color x:Key="Color.Surface.Elevated">#FF282828</Color>
+    <Color x:Key="Color.Surface.Control">#F5282828</Color>
+    <Color x:Key="Color.Surface.Popup">#E6282828</Color>
+
+    <Color x:Key="Color.Content.Primary">#FFFFFFFF</Color>
+    <Color x:Key="Color.Content.Secondary">#B3FFFFFF</Color>
+    <Color x:Key="Color.Content.Tertiary">#80FFFFFF</Color>
+    <Color x:Key="Color.Content.Disabled">#66FFFFFF</Color>
+    <Color x:Key="Color.Icon.Primary">#E6FFFFFF</Color>
+    <Color x:Key="Color.Icon.Secondary">#B3FFFFFF</Color>
+    <Color x:Key="Color.Icon.Tertiary">#80FFFFFF</Color>
+
+    <Color x:Key="Color.Border.Light">#0AFFFFFF</Color>
+    <Color x:Key="Color.Border.Standard">#14FFFFFF</Color>
+    <Color x:Key="Color.Border.Heavy">#29FFFFFF</Color>
+    <Color x:Key="Color.State.Rest">#08FFFFFF</Color>
+    <Color x:Key="Color.State.Selected">#0DFFFFFF</Color>
+    <Color x:Key="Color.State.Hover">#14FFFFFF</Color>
+    <Color x:Key="Color.State.Pressed">#1FFFFFFF</Color>
+    <Color x:Key="Color.State.Disabled">#0AFFFFFF</Color>
+
+    <Color x:Key="Color.Focus">#FF339CFF</Color>
+    <Color x:Key="Color.Focus.Text">#FF99CEFF</Color>
+    <Color x:Key="Color.Success">#FF40C977</Color>
+    <Color x:Key="Color.Target.DailyComplete">#FF257D57</Color>
+    <Color x:Key="Color.Target.Daily">#FFFB6A22</Color>
+    <Color x:Key="Color.Target.Weekly">#FFAD7BF9</Color>
+    <Color x:Key="Color.Target.Monthly">#FF40C977</Color>
+    <Color x:Key="Color.Error">#FFFA423E</Color>
+    <Color x:Key="Color.Warning">#FFFB6A22</Color>
+    <Color x:Key="Color.Notice">#FFFFD240</Color>
+    <Color x:Key="Color.Skill">#FFAD7BF9</Color>
+
+    <SolidColorBrush x:Key="SurfaceUnderBrush" Color="{StaticResource Color.Surface.Under}" />
+    <SolidColorBrush x:Key="SurfaceAppBrush" Color="{StaticResource Color.Surface.App}" />
+    <SolidColorBrush x:Key="SurfaceSidebarBrush" Color="{StaticResource Color.Surface.Sidebar}" />
+    <SolidColorBrush x:Key="SurfaceEditorBrush" Color="{StaticResource Color.Surface.Editor}" />
+    <SolidColorBrush x:Key="SurfaceElevatedBrush" Color="{StaticResource Color.Surface.Elevated}" />
+    <SolidColorBrush x:Key="SurfaceControlBrush" Color="{StaticResource Color.Surface.Control}" />
+    <SolidColorBrush x:Key="SurfacePopupBrush" Color="{StaticResource Color.Surface.Popup}" />
+    <SolidColorBrush x:Key="ContentPrimaryBrush" Color="{StaticResource Color.Content.Primary}" />
+    <SolidColorBrush x:Key="ContentSecondaryBrush" Color="{StaticResource Color.Content.Secondary}" />
+    <SolidColorBrush x:Key="ContentTertiaryBrush" Color="{StaticResource Color.Content.Tertiary}" />
+    <SolidColorBrush x:Key="ContentDisabledBrush" Color="{StaticResource Color.Content.Disabled}" />
+    <SolidColorBrush x:Key="IconPrimaryBrush" Color="{StaticResource Color.Icon.Primary}" />
+    <SolidColorBrush x:Key="IconSecondaryBrush" Color="{StaticResource Color.Icon.Secondary}" />
+    <SolidColorBrush x:Key="IconTertiaryBrush" Color="{StaticResource Color.Icon.Tertiary}" />
+    <SolidColorBrush x:Key="BorderLightBrush" Color="{StaticResource Color.Border.Light}" />
+    <SolidColorBrush x:Key="BorderStandardBrush" Color="{StaticResource Color.Border.Standard}" />
+    <SolidColorBrush x:Key="BorderHeavyBrush" Color="{StaticResource Color.Border.Heavy}" />
+    <SolidColorBrush x:Key="StateRestBrush" Color="{StaticResource Color.State.Rest}" />
+    <SolidColorBrush x:Key="StateSelectedBrush" Color="{StaticResource Color.State.Selected}" />
+    <SolidColorBrush x:Key="StateHoverBrush" Color="{StaticResource Color.State.Hover}" />
+    <SolidColorBrush x:Key="StatePressedBrush" Color="{StaticResource Color.State.Pressed}" />
+    <SolidColorBrush x:Key="StateDisabledBrush" Color="{StaticResource Color.State.Disabled}" />
+    <SolidColorBrush x:Key="FocusBrush" Color="{StaticResource Color.Focus}" />
+    <SolidColorBrush x:Key="FocusTextBrush" Color="{StaticResource Color.Focus.Text}" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource Color.Success}" />
+    <SolidColorBrush x:Key="DailyTargetCompleteBrush" Color="{StaticResource Color.Target.DailyComplete}" />
+    <SolidColorBrush x:Key="TargetDailyBrush" Color="{StaticResource Color.Target.Daily}" />
+    <SolidColorBrush x:Key="TargetWeeklyBrush" Color="{StaticResource Color.Target.Weekly}" />
+    <SolidColorBrush x:Key="TargetMonthlyBrush" Color="{StaticResource Color.Target.Monthly}" />
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource Color.Error}" />
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource Color.Warning}" />
+    <SolidColorBrush x:Key="NoticeBrush" Color="{StaticResource Color.Notice}" />
+
+    <!-- Compatibility aliases used by existing views. -->
+    <Color x:Key="AccentColor">#FF339CFF</Color>
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#FF99CEFF" />
+    <SolidColorBrush x:Key="InkBrush" Color="{StaticResource Color.Content.Primary}" />
+    <SolidColorBrush x:Key="MutedBrush" Color="{StaticResource Color.Content.Secondary}" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource Color.Surface.App}" />
+    <SolidColorBrush x:Key="ElevatedBrush" Color="{StaticResource Color.Surface.Elevated}" />
+    <SolidColorBrush x:Key="CanvasBrush" Color="{StaticResource Color.Surface.Under}" />
+    <SolidColorBrush x:Key="GlassBrush" Color="{StaticResource Color.Surface.Editor}" />
+    <SolidColorBrush x:Key="GlassStrongBrush" Color="{StaticResource Color.Surface.Control}" />
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource Color.Border.Standard}" />
+    <SolidColorBrush x:Key="StrongBorderBrush" Color="{StaticResource Color.Border.Heavy}" />
+    <SolidColorBrush x:Key="HoverBrush" Color="{StaticResource Color.State.Hover}" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="{StaticResource Color.State.Selected}" />
+    <SolidColorBrush x:Key="ProjectClientDotBrush" Color="{StaticResource Color.Icon.Tertiary}" />
+    <SolidColorBrush x:Key="ProjectClientTextBrush" Color="{StaticResource Color.Content.Secondary}" />
+    <SolidColorBrush x:Key="ProjectOptionSelectedBrush" Color="{StaticResource Color.State.Selected}" />
+    <SolidColorBrush x:Key="WindowBackdropBrush" Color="{StaticResource Color.Surface.App}" />
+    <SolidColorBrush x:Key="GlassHighlightBrush" Color="Transparent" />
+
+    <sys:Double x:Key="TextSize.XS">11</sys:Double>
+    <sys:Double x:Key="TextSize.SM">12</sys:Double>
+    <sys:Double x:Key="TextSize.Base">14</sys:Double>
+    <sys:Double x:Key="TextSize.LG">16</sys:Double>
+    <sys:Double x:Key="HeadingSize.SM">18</sys:Double>
+    <sys:Double x:Key="HeadingSize.MD">20</sys:Double>
+    <sys:Double x:Key="HeadingSize.LG">24</sys:Double>
+
+    <sys:Double x:Key="Layout.ToolbarHeight">46</sys:Double>
+    <sys:Double x:Key="Layout.SidebarDefault">275</sys:Double>
+    <sys:Double x:Key="Layout.SidebarMinimum">240</sys:Double>
+    <sys:Double x:Key="Layout.NavigationRowHeight">30</sys:Double>
+    <sys:Double x:Key="Layout.ContentMaximum">768</sys:Double>
+    <sys:Double x:Key="Layout.ContentWideMaximum">896</sys:Double>
+
+    <CornerRadius x:Key="Radius.Control">10</CornerRadius>
+    <CornerRadius x:Key="Radius.Navigation">12</CornerRadius>
+    <CornerRadius x:Key="Radius.Menu">15</CornerRadius>
+    <CornerRadius x:Key="Radius.Card">20</CornerRadius>
+    <CornerRadius x:Key="Radius.Composer">22</CornerRadius>
+    <CornerRadius x:Key="Radius.Dialog">25</CornerRadius>
+    <CornerRadius x:Key="Radius.Pill">999</CornerRadius>
+
+    <Duration x:Key="Motion.Basic">0:0:0.15</Duration>
+    <Duration x:Key="Motion.Panel">0:0:0.20</Duration>
+    <Duration x:Key="Motion.Spatial">0:0:0.30</Duration>
+</ResourceDictionary>

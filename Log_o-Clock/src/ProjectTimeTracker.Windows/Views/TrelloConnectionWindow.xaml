@@ -1,0 +1,57 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.TrelloConnectionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Connect Trello" Width="590" Height="520" ResizeMode="NoResize"
+        Style="{StaticResource DialogWindowStyle}" WindowStartupLocation="CenterOwner">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Connect this profile to Trello" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1" Margin="0,7,0,18" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedBrush}"
+                   Text="Read-only access imports cards assigned to you as tracker tasks. The API key and token are saved in Windows Credential Manager for this profile." />
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="1. Personal Power-Up API key" FontWeight="SemiBold" />
+            <TextBlock Margin="0,3,0,6" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                       Text="Create or open a Trello Power-Up, copy its API key, then paste it below." />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="ApiKeyText" AutomationProperties.Name="Trello API key" />
+                <Button Grid.Column="1" Content="Open app admin" Click="OpenAdmin_Click" />
+            </Grid>
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,18,0,0">
+            <TextBlock Text="2. Read-only user token" FontWeight="SemiBold" />
+            <TextBlock Margin="0,3,0,6" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                       Text="Authorize the app in your browser, copy the token Trello displays, and paste it here." />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <PasswordBox x:Name="TokenText" AutomationProperties.Name="Trello access token" />
+                <Button Grid.Column="1" Content="Authorize read-only" Click="Authorize_Click" />
+            </Grid>
+        </StackPanel>
+
+        <TextBlock x:Name="ValidationText" Grid.Row="4" Margin="3,14,3,0"
+                   Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" />
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" IsCancel="True" />
+            <Button x:Name="ConnectButton" Content="Connect" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Connect_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

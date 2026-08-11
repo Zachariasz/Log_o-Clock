@@ -1,0 +1,796 @@
+LOG O'CLOCK 1.142.2
+Created by Zachariasz Jędrzejczyk
+
+Recommended installation
+------------------------
+Exit any currently running Project Time Tracker or Log O'clock tray app, then run
+installer\LogOClock-Setup-1.142.2.msi and approve the Windows
+administrator prompt. The installer adds Log O'clock to Program Files
+and creates a Start menu shortcut.
+
+Portable launch
+---------------
+LogOClock-1.142.2-win-x64\LogOClock.exe is the same self-contained
+application without the installer. It does not require a separate .NET runtime.
+
+Time including short idle
+-------------------------
+Reports includes a Time + idle column and a second project-share chart. This value
+adds back only individual excluded idle intervals no longer than the configured
+Settings limit. The limit defaults to 60 minutes and can be set from 1 to 60.
+Normal tracked Time remains the net value with every accepted exclusion removed.
+The compact report table omits separate Paid and Unpaid duration columns; use the
+Payment filter and project/task Set as paid context actions to manage payment state.
+
+When adding or editing any target, Count toward target can use Active time only or
+Time including short idle. Existing targets continue using Active time after the
+upgrade. The choice is stored separately for each target and applies to its sidebar,
+Reports, review-notification, one-time-completion, and target-debt calculations.
+
+Daily safety and Google Sheets
+------------------------------
+Every profile keeps full daily SQLite snapshots under Documents\TimeTracker\Daily
+Backups and, by default, one readable CSV per work date under Daily Logs. Changed
+historical CSVs retain their prior revisions instead of overwriting the only copy.
+
+Settings > Google Sheets can optionally send daily log exports to one spreadsheet
+per profile, with one YYYY-MM-DD worksheet per day. Create a Desktop OAuth client
+in Google Cloud, enable the Google Sheets API, then paste the client ID and secret
+into Log O'clock. Browser authorization returns through a local loopback callback.
+Secrets are stored in Windows Credential Manager. Entries explicitly deleted in
+Log O'clock are removed from their daily worksheet after a successful sync. Other
+remote-only rows are retained as recovery candidates, but Google Sheets is not an
+automatic database-restore source. SQLite and daily database snapshots remain local
+so tracking remains reliable and transactional when Google or the network is down.
+
+Read-only Trello task synchronization
+-------------------------------------
+Each profile can connect independently from Settings > Trello. Create a personal
+Power-Up API key in Trello, paste it into the connection dialog, open the supplied
+read-only authorization page, and paste the generated token. The API key and token
+are stored in Windows Credential Manager rather than the tracker database.
+
+Use the mapping list context menu to map one Trello board and one or more open
+lists to a local project. Open cards assigned to the connected Trello account are
+available as normal tracker tasks after startup synchronization, the 15-minute
+background refresh, or Sync now. Trello-linked names are read-only locally and can
+be opened from the Tasks context menu. Disconnecting or removing a mapping preserves
+time history by detaching used tasks and removes unused linked tasks after confirmation.
+
+Date-free one-time targets
+--------------------------
+One-time targets no longer ask for or display a calendar date. Their progress
+accumulates from target creation until the configured hours are reached. A
+completed one-time target remains visible through Sunday of its completion week
+and disappears from the sidebar, Targets tab, and Project Settings on Monday.
+Existing dated one-time targets are migrated automatically; their old date is
+removed without changing their name, project, hours, or creation timestamp.
+
+Switchable project and client charts
+------------------------------------
+The Reports chart card now contains Projects and Clients tabs. Projects retains
+the existing donut for the selected report range and active filters. Clients
+shows total tracked time per client across the whole current calendar month,
+independently of those filters. Both views show hours:minutes, percentage share,
+and a matching legend without moving the chart or monthly-target panel.
+
+Queued repeated idle reviews
+----------------------------
+The app keeps measuring idle time while a long-idle Keep/Cut review is open.
+When activity resumes after another interval of at least five minutes, that
+interval waits behind the visible dialog and then opens as "Double trouble!".
+Further qualifying intervals follow in the same order. Only one idle review is
+shown at a time, and every interval retains its own duration and Keep/Cut choice.
+
+Returning-session heading
+-------------------------
+Prompts shown after Windows lock, sleep, sign-out, or persisted session recovery
+are now titled:
+You're back! What you were working on?
+This applies both to stopped-entry details and to the Keep/Cut inactive-time
+review when tracking continued. Normal timer, tray, stop-detail, and ordinary
+idle popups keep their standard headings.
+
+English interface language
+--------------------------
+All application-owned interface text now uses English (UK), regardless of the
+Windows account locale. History day headings show English weekday and month
+names, compact dates remain day-first, times remain 24-hour, and calendar
+navigation inherits the same English language. User-created descriptions,
+clients, projects, tasks, tags, and all other stored content are left exactly as
+entered.
+
+Resizable sidebar targets
+-------------------------
+The fixed sidebar target panel now has a draggable top edge. Drag upward to
+extend the target list or downward to squeeze it; the list keeps smooth scrolling
+at every size. Expansion stops before covering the sidebar navigation. The
+preferred height is stored per profile and restored on later launches, while a
+temporarily smaller window safely constrains the visible height.
+
+Continue matching recent entries
+--------------------------------
+Starting work now reopens the immediately previous unpaid entry when its project,
+task, description, and tags all match and the gap is shorter than the configured
+limit. The reopened entry keeps its original start, source, software, exclusions,
+and other history while the short gap becomes tracked time. The Settings limit is
+two minutes by default, accepts 0 through 1440 whole minutes, and 0 disables this
+behavior. A gap exactly equal to the limit, different or intervening work, and a
+paid previous entry always create a new log.
+
+Rolling four-hour short-idle total
+----------------------------------
+Accumulated idle intervals shorter than five minutes now use a rolling four-hour
+window instead of a calendar-day total. Only portions inside the previous four
+hours count; older time expires automatically, including across midnight. The
+state still carries across entries and app restarts, and the reminder schedule
+resets when the rolling window becomes empty.
+
+Stable first character in recognition reminders
+-----------------------------------------------
+When a window recognizes a project but no task, typing into the blank reminder
+task field now opens matching suggestions without selecting or replacing the
+first character. The caret remains after the typed text so further keystrokes
+append normally, matching the tracking bar and other task editors.
+
+Search while replacing a popup task
+-----------------------------------
+The running-entry notification now searches saved tasks while an assigned task
+is being replaced. Clearing the old name and typing immediately detaches the old
+selection, filters and opens matching suggestions, preserves the caret and first
+character, and autosaves the chosen result to the entry and main tracking bar.
+
+Clean task field after stopping
+-------------------------------
+Finishing a timer now clears the task name and selection in the main tracking
+bar. The reset applies consistently whether tracking is stopped from the app,
+tray, entry popup, or a system-session action, while the completed entry keeps
+its saved task unchanged.
+
+Searchable tasks in History Add Entry
+-------------------------------------
+The Add Entry task field now behaves like the main tracking bar. Typing filters
+the current project's saved tasks, opens matching suggestions, and sorts closer
+matches first. Opening the dropdown preserves the first typed character and
+caret position. Choosing a suggestion replaces the search text. A name with no
+existing match is still created automatically when the entry is saved.
+
+Editable running Start time
+---------------------------
+While tracking, the timer Start time is editable from both the tray/details
+popup and the main timer bar. Changes save automatically and immediately update
+the elapsed duration, tray state, database, and the other open editor. Compact
+input such as 13, 1312, and 13:12 is accepted. If a time later than the current
+clock time is entered for a timer started today, it is treated as yesterday.
+Moving Start forward clips or removes any earlier idle exclusions.
+
+Automatic overnight dates
+-------------------------
+When adding a History entry with matching Start and End dates, entering an End
+time earlier than the Start time automatically advances the End date by one day.
+The rollover is applied when the time field is committed and again before Save,
+so keyboard-only entry works as expected. An independently selected End date is
+never overridden.
+
+Permanent project and target removal
+------------------------------------
+Removing a project now permanently deletes its time entries, tasks, targets,
+window rules, debt adjustments, project settings, and correlated metadata.
+Removing a client permanently deletes all of its projects and the same related
+data. Monthly CSV files are regenerated after deletion. The warning dialog
+states that this cannot be undone. Removing an individual target also deletes
+its stored record. Version 1.124.0 purges targets and project data that older
+versions left archived.
+
+Project-grouped sidebar targets
+-------------------------------
+The fixed and floating sidebars show one compact row per project instead of one
+row per target. Multiple targets of the same cadence are summed. Daily, weekly,
+and monthly progress are drawn as orange, purple, and bright-green arcs overlaid
+in one ring. Global targets use one All projects · Every client row. Long names
+trim so the ring remains visible without horizontal scrolling.
+
+Reliable timer-bar project and task editing
+-------------------------------------------
+The Project chooser remains active while a timer is running and immediately
+reassigns the current entry. Project and Task dropdown rows now commit before
+the app's click-away behavior can close their popup. Starting a task search
+preserves the first typed character and caret, so subsequent characters append
+normally instead of replacing the first one. Choosing a saved task fills the
+field and updates the running entry automatically.
+
+Separated local profiles
+------------------------
+Use the profile selector beside Time Tracker in the title bar to switch, add,
+rename, or remove profiles. Every profile has an independent database, history,
+clients, projects, tasks, tags, software, window rules, targets, settings, and
+monthly CSV logs. Switching profiles stops a running timer only after
+confirmation and restarts the single tray instance in the selected workspace.
+
+Existing data remains in the built-in Default profile. New profile data is
+stored under Documents\TimeTracker\Profiles\<profile-id>. Removing a secondary
+profile moves its directory to Profiles\Removed for recovery; the original
+Default profile cannot be removed. Profiles are organizational separation, not
+password-protected Windows accounts.
+
+More visible History daily totals
+---------------------------------
+Each History day-group header now renders its duration total at 14 px, while
+keeping it aligned with the Duration column. Individual entry durations retain
+their existing compact size.
+
+Passive History row selection
+-----------------------------
+Clicking a History entry no longer leaves a selection fill or outline on the
+row. The normal hover indicator remains visible. Selection is still retained
+internally so existing multi-entry paid actions and row context menus continue
+to work.
+
+Individual project targets and ghost rows
+-----------------------------------------
+Daily, weekly, monthly, and one-time targets are individual records shared by
+Project Settings, the Targets tab, and Reports. The sidebar summarizes those
+records once per project and cadence. A project may
+contain multiple targets of the same type, and changing a target type preserves
+that target instead of recreating it. Project Settings lists every target for
+the project. If a recurring type is missing, a dimmed Daily, Weekly, or Monthly
+ghost row remains visible as a shortcut; it is not saved until hours are set.
+The Projects table still shows compact cadence summaries, calculated by adding
+the hours of all individual targets with that cadence. Existing target settings
+are migrated automatically after a timestamped database backup.
+
+Output-only call and video idle protection
+------------------------------------------
+Settings now has enabled-by-default switches for calls/sustained foreground
+audio and playing video, plus a live activity status. Listen-only calls remain
+protected when the microphone is muted, disabled, or unused because Windows
+communications ducking and the fallback observe render output only. Foreground audio must remain active for 10 seconds
+when Windows does not identify it as communications audio. Playing Windows
+media sessions reported as video or unclassified playback are protected;
+explicit music/images, ordinary background audio, system sounds, and brief
+notifications are ignored. The app never opens capture devices, requests
+microphone permission, samples content, or stores audio/media observations.
+
+Reversible target-debt adjustments
+----------------------------------
+Right-click a target with positive carried debt and choose Lower debt... to
+remove only part of it, using decimal hours or H:MM. The reduction must be less
+than the current debt; the row then shows the remaining amount, removed amount,
+and local adjustment date. Choose Cancel debt to remove the complete remainder.
+Every reduction or cancellation is stored as a dated adjustment. Double-click
+the correlated project target, choose Bring debt back, then save settings to
+restore all active adjustments. Restoration keeps every original adjustment and
+restore timestamp in the local database for auditability.
+
+Unified target views
+--------------------
+Reports no longer reserves a bottom strip for the redundant Selected, Value,
+and Current month unpaid text summary. Project total rows, chart totals, values,
+payment filters, and monthly targets remain unchanged in the main workspace.
+The Targets right-click menu now renders the Add target... and Edit... labels
+with clean punctuation instead of corrupted encoding symbols.
+The pinned sidebar now groups targets into one row per project, with a separate
+global row. Project Settings edits the individual records and supplies
+non-persisted ghost rows for missing recurring types. Reports shows every
+monthly target in one
+scrollable list: project-scoped targets, global targets, and targets for
+active project without work in the selected range. Daily, weekly, and one-time
+targets remain summarized in the sidebar and individually available in the
+Targets tab, but are intentionally hidden from the Reports list.
+Reports target rows remain visually neutral when hovered, clicked, selected, or
+keyboard-focused. Double-click editing and right-click actions remain active.
+The Targets tab now has a compact Project filter with All projects, Global
+targets, and active Project · Client choices. It filters the shared individual
+target rows and resets to All projects whenever the tab opens.
+
+Software project separator
+--------------------------
+The Software project filter now displays `Project · Client` with the same true
+middle dot and spacing used by the Tasks project filter.
+
+Sidebar target progress ring
+----------------------------
+Each sidebar project target now has one overlaid progress ring. Daily progress
+is orange, weekly is purple, and monthly is bright green; D/W/M letters match.
+Longer arcs draw first, so the shortest arc remains visible on top.
+
+Neutral sidebar targets
+-----------------------
+Targets in the fixed and compact floating sidebars no longer add a hover surface
+or keep a selected-row fill after clicking. Editing actions, progress rings, and
+completion colors remain.
+
+History date panel width
+------------------------
+The History date-range control is now 235 px wide, approximately 1.4x wider
+than the previous compact layout. Calendar and manual date input are unchanged.
+
+History filter selection
+------------------------
+Clicking a project, task, or tag dropdown row now commits the selected filter
+before the app's global click-away behavior can clear focus. Each filter then
+updates the visible History entries normally.
+
+Compact History tag panel
+-------------------------
+The History tag filter is now about 1.4x narrower. Its colored tag labels and
+all existing tag filtering behavior are unchanged.
+
+Compact History date panel
+--------------------------
+The History date-range control is now about 1.7x narrower. It retains both the
+dark calendar picker and full manual `DD.MM.YYYY - DD.MM.YYYY` date ranges.
+
+Maximized window bounds
+-----------------------
+The custom app window now maximizes to the current monitor's working area. It
+fills the available screen while leaving space for a taskbar docked at the
+bottom, top, left, or right edge.
+
+Standalone targets
+------------------
+Clients &amp; Projects has a Targets tab. Right-click its empty area to add a
+daily, weekly, monthly, or date-free one-time target. Project is optional:
+leave it on All projects for a shared goal. Double-click a row or right-click
+it to edit or remove the target. Recurring progress uses the same net tracked
+time and local calendar periods as Reports; one-time progress accumulates from
+creation until completion.
+
+Whole-word History wrapping
+---------------------------
+The History view's Wrap text setting wraps entries at word boundaries. It also
+allows wrapping after _, -, /, and \, plus camelCase and PascalCase boundaries,
+without adding, removing, or visibly changing any characters in the text.
+
+Compact window controls
+-----------------------
+The top-right minimize, maximize/restore, and close controls are now 31 px
+(about 1.5x smaller), including their proportionally scaled vector icons. Hover
+and pressed feedback remains unchanged.
+
+Report project selection
+------------------------
+Selecting a project group in Reports no longer draws a gray selection box. The
+selection still supports right-click actions and keyboard use; gray selection
+feedback remains only on task rows.
+
+Recognition reminder display
+----------------------------
+Project-recognition reminders now open in the lower-right corner of the monitor
+that contains the foreground recognized software window. If Windows cannot
+resolve that window, the normal primary-display placement is used.
+
+Monthly target debt
+-------------------
+Project Settings now offers "Carry unmet monthly target as debt". When enabled,
+each completed month adds its missing monthly hours to that project's debt. Debt
+is paid only from actual surplus: above the daily target when one is set,
+otherwise above the weekly target, otherwise above the monthly target. The
+normal target amount itself never repays debt. The sidebar, Reports, and target
+review show only a compact positive amount such as +5h, +30 min, or +3h 49 min.
+
+Scheduled target review
+-----------------------
+Settings now includes an optional "Show scheduled weekly and monthly target
+review" switch. When enabled, choose one weekday plus whether it is that
+weekday's First, Second, Penultimate, or Last occurrence in the month. On the
+chosen date, a compact dark notification appears once if any project has a
+weekly/monthly target; it summarizes current W/M progress and all outstanding
+target debt. The reminder does not repeat again on that scheduled date.
+
+Click-away editing
+------------------
+Clicking any non-editable app surface now ends active text editing without
+discarding the draft. This applies throughout the app, including the timer-bar
+task and description fields. Moving between timer fields also closes the prior
+field's task/project dropdown.
+
+Recognition reminder break
+--------------------------
+The project-recognition reminder now includes a top-right **Gimme break!**
+button. It closes the current prompt without starting a timer and pauses all
+project-recognition prompts for five minutes. Hover the button for two seconds
+to see its short explanation. When the break ends, the current foreground
+window is reconsidered automatically.
+
+The supplied clock artwork is used for the executable, installed shortcut,
+Windows taskbar, app/dialog title bars, and Add/Remove Programs. The compact
+system-tray icon remains the original gray idle or green running play/pause icon.
+
+Accumulated short-idle review
+-----------------------------
+Settings has a separate "Review accumulated short idle time after" value (five
+minutes by default). Only detected idle intervals strictly shorter than five
+minutes contribute; excluded-software visits and longer idle periods stay in
+their independent review flows. Short intervals are remembered across timer
+entries during the same local day and are cut from their original logs when
+accepted. Yes resets the total so another threshold can prompt again. No keeps
+the total, skips the 2x reminder, and asks again at 3x, 4x, and every following
+multiple. The persisted total resets when the local calendar day changes and
+never grows while no timer is running.
+
+Task recognition
+----------------
+Task recognition now compares task words without depending on spaces,
+underscores, hyphens, or other delimiters. A recognized task is written
+directly into the recognition reminder's task field; if no task matches, that
+field remains empty.
+
+Software tags
+-------------
+The new-tag input in the Software add/edit dialog is now labeled "Add New".
+
+Excluded software
+-----------------
+The Exclude toggle in the Software dialog uses the same neutral bright-gray fill
+as an active tab when enabled, plus its thumb position, without a blue focus
+outline. While exclusion is enabled, correlated tags are hidden completely.
+
+Window controls
+---------------
+Minimize, maximize, and close now show subtle hover and pressed feedback, but
+do not retain a blue focus outline after being clicked.
+
+Neutral interaction states
+--------------------------
+Tracker fields, filters, buttons, checkboxes, switches, and chooser controls no
+longer use persistent blue focus outlines. Focus and active feedback use the
+same neutral gray state layers as tabs. History and Reports date shortcuts keep
+that bright-gray selected state whenever the current range matches Today, This
+week, or This month. The calendar's blue outline for today remains unchanged.
+
+Manual entry times
+------------------
+Start and end fields accept compact numeric times without a colon. Examples:
+1312 means 13:12, 132 means 01:32, 1303 means 13:03, and 034 means 00:34.
+Valid input is normalized to HH:MM when the field loses focus.
+
+Date controls
+-------------
+The date-range controls in History and Reports are labeled "Date".
+
+First use
+---------
+1. Open Clients, right-click its empty area, and choose Add client.
+2. Open Projects, right-click its empty area, and choose Add project.
+3. Optionally add saved tasks and window-recognition rules from the empty-area
+   context menu in those tabs.
+4. Choose the project in the top timer bar and click Start.
+
+When a project's positive daily target is reached or exceeded, its D progress
+line receives a #257D57 green fill in both the pinned sidebar and the Current
+project targets list in Reports. Weekly and monthly progress stays neutral.
+
+Wide lists can be navigated in both directions. The mouse wheel keeps its
+smooth vertical behavior, while a horizontal touchpad or tilt-wheel gesture
+scrolls left and right with pixel-based motion. This applies throughout
+History, Reports, Clients & Projects, targets, reminders, and editor lists;
+nested lists hand the gesture to their parent when they reach an edge.
+
+When adding or editing a History entry, a whole hour such as 13 is accepted as
+13:00 local time. The task field uses the same direct typing behavior as the
+tracking bar: select a saved task or click the field and type a new name. Save
+entry or Enter reuses a case-insensitive match or creates the new task inside
+the selected project and assigns the entry to it.
+
+The Add/Edit Time Entry window now adapts to the available screen height. When
+software, idle-time, or other optional details make the form longer, the fields
+scroll smoothly while Save entry and Cancel remain fixed and reachable at the
+bottom. The dialog can also be resized vertically.
+
+Right-click a specific day heading in History, or empty space belonging to that
+day group, and choose Add entry to prefill both dates with the clicked day. The
+start and end dates can still be changed normally before saving. Adding from
+general History empty space keeps the current-date default.
+
+For a new History entry, changing Start date automatically copies that date to
+End date. You can then change End date independently for an entry spanning more
+than one day. Editing an existing entry keeps its two dates independent.
+
+After choosing a project and entering or selecting a task, press Enter from any
+editable timer-bar field to start tracking. While a timer is already running,
+Enter applies the current task and description without stopping or replacing
+the timer. In the automatic tracker-details popup, plain Enter saves and closes
+the popup; Shift+Enter remains available for a new description line.
+
+Typing in the timer-bar Task field automatically opens a dropdown containing
+case-insensitive matches from the selected project. Prefix matches are listed
+first, unrelated tasks are hidden, and choosing a result uses that saved task.
+If nothing matches, the typed text remains available as a new task name for
+Start or Enter.
+
+The automatic tracker-details popup uses one editable task field. Choose an
+existing task from its dropdown or type a new task name directly. A typed name
+is matched case-insensitively to an existing task or created automatically when
+the popup autosaves, when Enter is pressed, when you click away, or when you use
+Rip from this moment. There is no separate Add task button.
+
+Choosing an existing task from the popup dropdown immediately replaces any
+text already typed in the task field. The selected task is autosaved and the
+top timer bar updates to the same task name.
+
+When a timer is running, a single left-click on the tray icon reopens that
+entry's task-and-description popup with the current values preserved. A double
+left-click opens the main app and suppresses the pending single-click action.
+When idle, a single left-click retains the shortcut for opening the app.
+
+The running-entry tray popup saves edits automatically while it remains open
+and when you click away, so it has no Done button. Use Stop timer to save the
+visible task and description and stop through the normal entry-review flow, or
+use Rip from this moment to split the entry without losing its information.
+
+Hovering the tray icon while tracking shows Task · Project — HH:MM:SS. The
+client name is omitted. If the running entry has no task yet, it shows only
+Project — HH:MM:SS. Long task/project labels are shortened while the full live
+time suffix remains visible.
+
+Right-click the tray icon and choose Start timer to begin immediately without
+choosing a project or task first. The timer is already running when the compact
+details popup appears. Use that popup to choose the project, select or type a
+task, and enter a description. Typed task text is preserved even when entered
+before the project and is created or reused inside the project once selected.
+
+Until a project is chosen, the entry is stored safely as Unassigned and remains
+pending for later review, including after a crash or restart. This hidden
+system project does not appear in Clients, Projects, normal project selectors,
+or management filters. Existing one-click project shortcuts remain available
+under the tray menu's Start for project submenu.
+
+The tray popup also provides "Rip from this moment". It first applies the
+currently shown task and description to the finishing entry, then atomically
+starts a new entry at the exact same timestamp with those values copied. The
+popup remains open and switches to the new entry, so any later task or
+description edits affect only the new segment.
+
+History shows removed idle time directly below each affected net duration as a
+smaller gray subtraction. Double-click the completed log to edit its
+"Subtracted idle time" in HH:MM:SS format. Setting it to 00:00:00 restores the
+full gross duration; the result must still leave at least one tracked minute.
+
+Double-click an existing entry, client, project, task, tag, or recognition rule
+to edit it. Right-click a row for its full edit/remove menu.
+
+The Tasks tab has a Project filter above the list. Choose an active project to
+show only its tasks; each choice is displayed as Project · Client. Add task
+prefills the currently filtered project. Entering Tasks again resets the filter
+to All projects, and archived projects are not offered.
+
+Software is never added automatically. Add it manually under Clients & Projects
+> Software, either by entering its process name or using Capture active process.
+In Project scope, choose No project Â· Global Â· every project to record that
+process in every project's entries and share one exclusion/tag configuration.
+Choosing a specific project limits tracking and those settings to explicitly
+assigned projects. Unknown processes are ignored. Change a configured process
+label to update History, entry editing, CSV exports, monthly log files, and every
+existing entry automatically.
+
+The Software tab includes Project and Client columns plus a project filter.
+Right-click empty space and choose Add software to configure a process. Select
+No project for a single All projects row with shared tracking, exclusion, and
+correlated tags. Select a project for a project-only row. The process label is
+global because it is displayed in historical entries. Double-click a row to edit
+the corresponding global or project-specific configuration.
+
+Right-click a Software row and choose Remove from list to remove that process
+from the Software tab, every existing History entry, and synchronized monthly
+logs. Its project exclusions and correlated tags are cleared too. Adding the
+same process later restores its list record but starts with no historical
+software associations.
+
+The correlated-tags area in Add/Edit Software now has room for three wrapped
+rows of tag chips. Longer tag lists scroll smoothly downward inside that area,
+and excluding the software still disables and grays out the complete editor.
+
+When adding software, choose Capture active process in 3 seconds and switch to
+the target application. The dialog minimizes for the countdown, then returns
+with the process name filled in. If the display label was blank, it is filled
+from the process too and remains editable before saving.
+
+Enable "Exclude this software from tracked work" to treat time in that process
+like idle time only while the corresponding project is running. The same process
+can remain normally tracked in other projects. Separate visits to each excluded
+app are accumulated independently. The app asks only after that app reaches the
+configured total—five minutes by default—and asks only once per app during the
+current running entry. Keep or Cut then applies automatically to later visits to
+that app. Cut stores the visits as separate exclusions, so work between visits is
+not removed. Change the threshold in Settings under "Review excluded software
+after". Software excluded for a recognized project does not trigger that
+project's reminder and is not added to that project's new logs.
+
+All Keep/Cut reviews for user idle time, excluded software, Windows lock or
+sign-out, and sleep/resume open as always-on-top dialogs. They remain above
+other applications until you choose whether the inactive interval should stay
+in or be removed from the running entry.
+
+Correlated tags are project-specific unless the software uses No project global
+scope, in which case the same tags are offered in every project. Blender can
+still suggest animation tags for one project and rigging tags for another when
+configured per project. When recognition matches a project and process, only
+the effective tags appear as toggle buttons. Unchecked
+suggestions stay gray; selecting one fills it with the tag's color. The same
+gray-unused and colored-selected states are used when editing correlated tags in
+the Software tab. Selected tags are appended at the end of the description in
+brackets and remain editable.
+
+Add/Edit Software also accepts new correlated tags directly above the chips.
+Finish a tag name with a comma to convert it immediately into a colored toggle;
+new tags start enabled. Typing an existing name selects its existing toggle
+without creating a duplicate. New tags inherit the selected Software scope:
+project software creates a project-related tag, while global software creates a
+global tag available in every project.
+
+Tags are project-related by default. A tag typed into a timer, entry,
+recognition reminder, or project-scoped Software editor is offered only for that
+project. In Clients & Projects > Tags, right-click empty space to Add tag or
+double-click an existing tag to edit it. Availability can be changed between a
+specific project and Global · every project; the grid shows the current Project
+and Client scope. Existing tags are migrated as global so an upgrade never hides
+previously available tag suggestions.
+
+When Exclude this software from tracked work is enabled, the complete correlated-
+tags area is grayed out and cannot be edited because excluded software does not
+trigger tag suggestions. Unchecking exclusion restores tag editing with the
+previous selections preserved.
+The enabled exclusion switch now uses the same bright-gray track and dark thumb
+as enabled switches in Settings, while retaining its outline-free focus behavior.
+
+A recognized-project reminder stays visible indefinitely when there is no
+input. Clicking elsewhere cannot discard it during its first three seconds.
+After that guard expires, the next click outside dismisses it, while clicks
+inside keep working immediately.
+
+Launching Log O'clock does not automatically open recognition or
+ordinary pending-details popups. The window that was already focused before
+launch is not treated as a new recognition visit. A task stopped specifically
+by Windows sign-out is the intentional exception and reopens that exact entry
+for review after sign-in. Recognition resumes after the next real foreground-
+window change, and other pending entries remain available in History.
+
+The recognized-project reminder includes an editable task dropdown and a
+tag-aware description field. When recognition finds the project but no unique
+task, the task field stays blank. A unique recognized task is still prefilled.
+Typing opens the dropdown automatically and filters
+the recognized project's saved tasks by partial name, with matches beginning
+earlier ranked first just like the main tracker bar. Choose a result or leave
+unmatched text as a new task name, optionally enter a description, toggle any
+suggested software tags, and press Start timer. All values are applied to the
+running entry immediately.
+No second task-update popup opens after Start; review remains available from the
+tray or when an incomplete entry stops. Returning focus to the recognized
+software no longer cancels an accepted Start.
+
+When a project is recognized, the active window title is also compared in
+memory with active saved tasks belonging to that project. A unique longest
+task-name match is filled in automatically. Matching ignores letter case and
+punctuation/separator differences, but does not guess between equally strong
+matches or match a task inside another word. The suggested task remains fully
+editable in the reminder.
+
+If another configured project is recognized while a timer is running, the
+reminder asks whether to switch projects. The current project's own recognized
+windows remain silent. Accepting Switch project closes the current entry and
+starts the recognized project at the exact same timestamp. The old entry keeps
+its existing task and description; values entered in the switch reminder belong
+only to the new entry.
+
+Open Settings and use "When Windows locks, signs out, or sleeps" to choose the
+session behavior. "Stop the running timer" closes the current log immediately.
+After unlock, resume, or the next sign-in, the exact ended log opens in the
+task-and-description popup so its missing or existing information can be
+reviewed. "Keep running and review unavailable time" leaves the timer active
+and asks whether to Keep or Cut the inactive interval after returning. The same
+question is restored after an actual Windows sign-out. Keep counts the interval
+as work; Cut records it as an exclusion and subtracts it from work duration.
+
+Projects, tasks, tags, and window rules support Ctrl-click, Shift-click, and
+Ctrl+A multi-selection. Right-click the selection and choose Edit to change all
+selected rows. Shared values are prefilled; differing values are marked
+"Multiple values" and are preserved unless their Apply checkbox is selected.
+
+Each project can have daily, weekly, and monthly hour targets. Target progress
+uses the same local calendar boundaries and net-duration calculation as Reports:
+the current day from midnight to midnight, the Monday-through-Sunday week, and
+the whole current calendar month. Current D/W/M progress appears in the
+sidebar and Reports.
+
+Completed entries with less than one minute of net tracked time are removed
+automatically. This applies to timer stops, manual entries, history edits, idle
+exclusions, and crash recovery. Entries lasting exactly one minute are kept.
+
+Each date group in History shows the total net duration of its visible entries
+in the Duration column. Project, task, and tag filters update this daily total.
+
+The Description field in History filters the current date range as you type.
+Matching is case-insensitive and accepts any partial description text. Clearing
+the field restores the other visible entries, and re-entering History resets it
+alongside the project, task, and tag filters.
+
+Right-click one completed History entry and choose Continue to start a new
+unpaid timer with the same client/project, saved task, complete description,
+and tags. The source log remains unchanged. If another timer is active, it ends
+at the exact timestamp the continued timer begins. Software usage and idle
+exclusions are recorded afresh; removed projects or saved tasks cannot be
+continued.
+
+History marks intersecting tracked intervals with a smaller red pair of stacked,
+opposing arrows immediately before the value in the Duration column. Detection uses the
+same minute precision shown by the Start and End columns. If one entry displays
+an end of 12:13 and the next displays a start of 12:13, they are treated as
+adjacent even when a timer endpoint contains hidden seconds. Genuine overlaps
+that continue into another displayed minute remain marked.
+
+In the Add/Edit time entry dialog, moving into an editable text, date, or time
+value with Tab selects the full value. The first click into an unfocused value
+also selects it, so new typing replaces it immediately. Click again after the
+field has focus to place the caret for a smaller correction.
+
+Right-click any History column header and choose Hide column, or open the
+three-horizontal-line view-settings button and use its Columns submenu to show
+or hide fields. Hiding, reordering, or resizing a column reveals Save Current
+View. Saving retains that layout for later launches. Restore default is in the
+same settings menu; press Save Current View afterward only if the default should
+replace the previously saved layout.
+
+Reports has the same column layout workflow. Right-click a task-summary
+column header and choose Hide column, or use the three-horizontal-line view menu
+to show hidden fields and restore the defaults. Hidden fields and resized column
+widths are synchronized across every project group and its aligned Project total
+row. Changing either reveals Save Current View; saving stores the complete Reports
+layout for subsequent launches.
+
+Within each Reports project group, tasks are ordered by their latest activity
+in the selected date range. The most recently worked task appears first,
+regardless of whether an older task has a longer accumulated duration.
+
+The Reports circle chart displays its center total and each project's legend
+duration as sexagesimal hours and minutes. For example, one and a half hours is
+shown as 1:30 h instead of 1.5 h.
+
+Removed clients, projects, tasks, tags, and project-linked window rules no
+longer appear in filters or other selectable active-option lists. Historical
+logs and report totals remain intact.
+
+In the History and Reports calendar, the first day click immediately applies
+that single day. The popup stays open so a second day click can expand it to an
+inclusive range; clicking away preserves the latest selection.
+
+History and Reports also provide This month, This week, and Today shortcuts
+beside the date-range field. They apply and refresh immediately. This month
+uses the complete calendar month, This week uses Monday through Sunday, and
+Today uses one local calendar day.
+
+History opens and resets to the full current calendar month, from the first day
+through the final day. Intentional report-to-History drill-down keeps the
+report's selected date range instead of replacing it with this default.
+
+Window recognition rules are grouped into project sections. A project filter
+above the list can show all active projects or isolate one project, without
+changing multi-selection, double-click editing, or context-menu actions.
+
+All active data files are stored at:
+%UserProfile%\Documents\TimeTracker
+
+TimeTracker.db contains shared clients, projects, tasks, scoped/global tags, global software
+labels, project-specific software exclusions/tag correlations, per-entry
+software associations, and settings. Before upgrading existing data, the app
+creates a timestamped database backup. Existing tags are preserved as global;
+newly discovered tags are linked to the entry's project.
+Each month also has a readable TimeTracker-Logs-YYYY-MM.csv log file. Existing
+data from %LocalAppData%\ProjectTimeTracker\tracker.db is copied automatically
+on first launch; the original is retained as a safety copy.
+
+Privacy
+-------
+Tracked data remains local unless Google Sheets export is explicitly enabled for
+the current profile. Process names are saved only while a timer is
+running because they form part of that time entry. Unknown window titles are
+inspected only in memory and are not written to the database. The app has no
+telemetry. Network access is limited to Trello and Google integrations configured
+by the user; both keep their credentials in Windows Credential Manager.
+
+Signing note
+------------
+This development build is unsigned because no trusted publisher certificate was
+available. Windows may show an Unknown Publisher warning. The source build script
+supports SHA-256 signing and timestamping when supplied with a code-signing
+certificate.

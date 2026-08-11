@@ -1,0 +1,60 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.TrelloMappingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Trello mapping" Width="620" Height="650" MinHeight="560"
+        ResizeMode="CanResizeWithGrip" Style="{StaticResource DialogWindowStyle}"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeadingText" Text="Add Trello mapping" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Grid.Row="1" Margin="0,7,0,16" Foreground="{StaticResource MutedBrush}"
+                   TextWrapping="Wrap"
+                   Text="Cards assigned to the connected Trello user in the selected lists become tasks in this project." />
+
+        <StackPanel Grid.Row="2">
+            <TextBlock Text="Local project" FontWeight="SemiBold" />
+            <ComboBox x:Name="ProjectCombo" DisplayMemberPath="DisplayName" SelectedValuePath="ProjectId" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,14,0,0">
+            <TextBlock Text="Trello board" FontWeight="SemiBold" />
+            <ComboBox x:Name="BoardCombo" DisplayMemberPath="Name" SelectedValuePath="Id"
+                      SelectionChanged="BoardCombo_SelectionChanged" />
+        </StackPanel>
+
+        <Grid Grid.Row="4" Margin="0,14,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="Lists to synchronize" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <ListBox x:Name="ListsBox" Grid.Row="1" MinHeight="180"
+                     Background="{StaticResource SurfaceControlBrush}"
+                     BorderBrush="{StaticResource BorderStandardBrush}" BorderThickness="1">
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox Content="{Binding List.Name}" IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                  HorizontalContentAlignment="Left" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <TextBlock x:Name="ValidationText" Grid.Row="5" Margin="3,12,3,0"
+                   Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" />
+        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" IsCancel="True" />
+            <Button x:Name="SaveButton" Content="Save mapping" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Save_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,214 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.BulkEditWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Edit selected objects" Width="620" Height="760" MinHeight="520"
+        Style="{StaticResource DialogWindowStyle}" WindowStartupLocation="CenterOwner">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeadingText" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock x:Name="DescriptionText" Grid.Row="1" Margin="0,7,0,14"
+                   Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" />
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <Grid x:Name="ProjectRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyProjectCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Project" FontWeight="SemiBold" />
+                        <TextBlock x:Name="ProjectMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <ComboBox x:Name="ProjectCombo" Grid.Column="2" DisplayMemberPath="DisplayName"
+                              SelectedValuePath="ProjectId" SelectionChanged="ProjectCombo_SelectionChanged" />
+                </Grid>
+
+                <Grid x:Name="ClientRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyClientCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Client" FontWeight="SemiBold" />
+                        <TextBlock x:Name="ClientMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <ComboBox x:Name="ClientCombo" Grid.Column="2" DisplayMemberPath="Name"
+                              SelectedValuePath="Id" SelectionChanged="ClientCombo_SelectionChanged" />
+                </Grid>
+
+                <Grid x:Name="ColorRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyColorCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Color" FontWeight="SemiBold" />
+                        <TextBlock x:Name="ColorMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <Button x:Name="ColorButton" Grid.Column="2" HorizontalContentAlignment="Left"
+                            Click="ColorButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="ColorSwatch" Width="14" Height="14" CornerRadius="7"
+                                    Margin="0,0,9,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ColorValueText" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
+
+                <Grid x:Name="DailyRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyDailyCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Daily target (hours)" FontWeight="SemiBold" />
+                        <TextBlock x:Name="DailyMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="DailyText" Grid.Column="2" TextChanged="DailyText_TextChanged"
+                             ToolTip="Apply an empty value to clear the target" />
+                </Grid>
+
+                <Grid x:Name="WeeklyRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyWeeklyCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Weekly target (hours)" FontWeight="SemiBold" />
+                        <TextBlock x:Name="WeeklyMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="WeeklyText" Grid.Column="2" TextChanged="WeeklyText_TextChanged"
+                             ToolTip="Apply an empty value to clear the target" />
+                </Grid>
+
+                <Grid x:Name="MonthlyRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyMonthlyCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Monthly target (hours)" FontWeight="SemiBold" />
+                        <TextBlock x:Name="MonthlyMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="MonthlyText" Grid.Column="2" TextChanged="MonthlyText_TextChanged"
+                             ToolTip="Apply an empty value to clear the target" />
+                </Grid>
+
+                <Grid x:Name="CarryDebtRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyCarryDebtCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Carry monthly debt" FontWeight="SemiBold" />
+                        <TextBlock x:Name="CarryDebtMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <CheckBox x:Name="CarryDebtCheck" Grid.Column="2" Content="Enabled"
+                              VerticalAlignment="Center" Checked="CarryDebtCheck_Changed"
+                              Unchecked="CarryDebtCheck_Changed" />
+                </Grid>
+
+                <Grid x:Name="RateRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyRateCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Hourly rate" FontWeight="SemiBold" />
+                        <TextBlock x:Name="RateMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="RateText" Grid.Column="2" TextChanged="RateText_TextChanged"
+                             ToolTip="Apply an empty value to clear the hourly rate" />
+                </Grid>
+
+                <Grid x:Name="CurrencyRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyCurrencyCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Currency" FontWeight="SemiBold" />
+                        <TextBlock x:Name="CurrencyMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <ComboBox x:Name="CurrencyCombo" Grid.Column="2"
+                              SelectionChanged="CurrencyCombo_SelectionChanged" />
+                </Grid>
+
+                <Grid x:Name="PatternRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyPatternCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Window title phrase" FontWeight="SemiBold" />
+                        <TextBlock x:Name="PatternMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="PatternText" Grid.Column="2" TextChanged="PatternText_TextChanged" />
+                </Grid>
+
+                <Grid x:Name="ProcessRow" Margin="0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <CheckBox x:Name="ApplyProcessCheck" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="Process name" FontWeight="SemiBold" />
+                        <TextBlock x:Name="ProcessMixedText" Text="Multiple values" FontSize="11"
+                                   Foreground="{StaticResource WarningBrush}" Visibility="Collapsed" />
+                    </StackPanel>
+                    <TextBox x:Name="ProcessText" Grid.Column="2" TextChanged="ProcessText_TextChanged"
+                             ToolTip="Apply an empty value to remove the process filter" />
+                </Grid>
+            </StackPanel>
+        </ScrollViewer>
+
+        <TextBlock x:Name="ValidationText" Grid.Row="3" Margin="3,12,3,0"
+                   Foreground="{StaticResource DangerBrush}" TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+            <Button Content="Cancel" IsCancel="True" />
+            <Button Content="Apply to selected" IsDefault="True"
+                    Style="{StaticResource PrimaryButton}" Click="Save_Click" />
+        </StackPanel>
+    </Grid>
+</Window>

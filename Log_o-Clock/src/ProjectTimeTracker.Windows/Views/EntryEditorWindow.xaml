@@ -1,0 +1,130 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.EntryEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:ProjectTimeTracker.Windows.Controls"
+        Title="Time entry" Width="560" Height="680" MinHeight="520" ResizeMode="CanResize"
+        Style="{StaticResource DialogWindowStyle}" WindowStartupLocation="CenterOwner">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <ScrollViewer x:Name="EntryFormScrollViewer"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      CanContentScroll="False"
+                      PanningMode="VerticalOnly"
+                      AutomationProperties.Name="Time entry fields">
+            <Grid Margin="0,0,8,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="HeadingText" FontSize="22" FontWeight="SemiBold" Text="Time entry" />
+
+                <StackPanel Grid.Row="1" Margin="0,18,0,0">
+                    <TextBlock Text="Project" FontWeight="SemiBold" />
+                    <ComboBox x:Name="ProjectCombo" DisplayMemberPath="DisplayName" SelectedValuePath="ProjectId"
+                              SelectionChanged="ProjectCombo_SelectionChanged" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="2" Margin="0,10,0,0">
+                    <TextBlock Text="Task — choose existing or type new (optional)" FontWeight="SemiBold" />
+                    <ComboBox x:Name="TaskCombo" DisplayMemberPath="Name" SelectedValuePath="Id"
+                              IsEditable="True" IsTextSearchEnabled="False" StaysOpenOnEdit="True"
+                              PreviewKeyDown="TaskCombo_PreviewKeyDown"
+                              SelectionChanged="TaskCombo_SelectionChanged"
+                              ToolTip="Select a task or type a new task name"
+                              AutomationProperties.Name="Task" />
+                </StackPanel>
+
+                <StackPanel x:Name="SoftwarePanel" Grid.Row="3" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Software used" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SoftwareText" Margin="3,4,0,0" TextWrapping="Wrap"
+                               Foreground="{StaticResource ContentSecondaryBrush}" />
+                </StackPanel>
+
+                <Grid Grid.Row="4" Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition />
+                        <ColumnDefinition Width="16" />
+                        <ColumnDefinition />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Start date and time (local)" FontWeight="SemiBold" />
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="82" />
+                            </Grid.ColumnDefinitions>
+                            <DatePicker x:Name="StartDatePicker"
+                                        SelectedDateChanged="StartDatePicker_SelectedDateChanged" />
+                            <TextBox x:Name="StartTimeText" Grid.Column="2" Margin="0"
+                                     LostKeyboardFocus="TimeText_LostKeyboardFocus"
+                                     ToolTip="Start time, for example 13, 13:30, or 1330" />
+                        </Grid>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="End date and time (local)" FontWeight="SemiBold" />
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="82" />
+                            </Grid.ColumnDefinitions>
+                            <DatePicker x:Name="EndDatePicker" />
+                            <TextBox x:Name="EndTimeText" Grid.Column="2" Margin="0"
+                                     LostKeyboardFocus="TimeText_LostKeyboardFocus"
+                                     ToolTip="End time, for example 14, 14:30, or 1430" />
+                        </Grid>
+                    </StackPanel>
+                </Grid>
+
+                <StackPanel x:Name="IdleTimePanel" Grid.Row="5" Margin="0,10,0,0" Visibility="Collapsed">
+                    <TextBlock Text="Subtracted idle time" FontWeight="SemiBold" />
+                    <TextBox x:Name="IdleTimeText" Width="120" HorizontalAlignment="Left" Margin="0,4,0,0"
+                             ToolTip="Excluded duration in HH:MM:SS format" />
+                    <TextBlock Text="This time is deducted from the duration shown in History and Reports."
+                               Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="3,4,0,0" />
+                </StackPanel>
+
+                <TextBlock Grid.Row="6" Text="Description (optional)" FontWeight="SemiBold" Margin="0,10,0,0" />
+                <controls:TagDescriptionEditor x:Name="DescriptionText" Grid.Row="7"
+                                               Height="120"
+                                               AcceptsReturn="True"
+                                               Style="{StaticResource TagEditorStyle}"
+                                               Margin="0,4,0,0" />
+
+                <CheckBox x:Name="PaidCheck" Grid.Row="8" Margin="3,12,3,0"
+                          Content="This entry has been paid" />
+            </Grid>
+        </ScrollViewer>
+
+        <Grid Grid.Row="1" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="ValidationText"
+                       Margin="0,0,12,0"
+                       Foreground="{StaticResource DangerBrush}"
+                       TextWrapping="Wrap"
+                       VerticalAlignment="Center" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Cancel" IsCancel="True" />
+                <Button x:Name="SaveEntryButton" Content="Save entry" IsDefault="True"
+                        Style="{StaticResource PrimaryButton}" Click="Save_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
