@@ -1733,11 +1733,26 @@
             </TabItem>
 
             <TabItem Header="Settings">
-                <ScrollViewer VerticalScrollBarVisibility="Auto"
-                              HorizontalScrollBarVisibility="Disabled"
-                              CanContentScroll="False">
-                <StackPanel Margin="32,24" MaxWidth="768" HorizontalAlignment="Center">
-                    <TextBlock Text="Settings" Style="{StaticResource PageTitleTextStyle}" />
+                <Grid Margin="32,24" MaxWidth="768" HorizontalAlignment="Stretch">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="Settings" Style="{StaticResource PageTitleTextStyle}" />
+                        <TextBlock Text="Configure tracking, idle behavior, targets, integrations, and application preferences"
+                                   Style="{StaticResource PageDescriptionTextStyle}" />
+                    </StackPanel>
+                    <TabControl x:Name="SettingsCategoryTabs" Grid.Row="1" Margin="0,16,0,0"
+                                AutomationProperties.Name="Settings categories">
+                        <TabItem Header="Tracking">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          CanContentScroll="False">
+                                <StackPanel Margin="4,8,4,24">
+                                    <TextBlock Text="Tracking" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Project recognition and automatic continuation rules"
+                                               Style="{StaticResource PageDescriptionTextStyle}" />
                     <CheckBox x:Name="RecognitionCheck" Margin="0,24,0,8" Content="Recognize configured projects from active window titles"
                               Style="{StaticResource ToggleSwitchStyle}"
                               Checked="RecognitionCheck_Changed" Unchecked="RecognitionCheck_Changed" />
@@ -1761,6 +1776,18 @@
                     <TextBlock x:Name="RecentEntryResumeValidationText"
                                TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
                                Margin="3,5,0,0" Visibility="Collapsed" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+
+                        <TabItem Header="Idle &amp; sessions">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          CanContentScroll="False">
+                                <StackPanel Margin="4,8,4,24">
+                                    <TextBlock Text="Idle &amp; sessions" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Windows availability, protected activity, and idle review thresholds"
+                                               Style="{StaticResource PageDescriptionTextStyle}" />
                     <TextBlock Text="When Windows locks, signs out, or sleeps" FontWeight="SemiBold" Margin="0,28,0,6" />
                     <ComboBox x:Name="SessionBehaviorCombo"
                               SelectionChanged="SessionBehaviorCombo_SelectionChanged"
@@ -1856,6 +1883,18 @@
                     <TextBlock x:Name="ShortIdleReportingValidationText"
                                TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
                                Margin="3,5,0,0" Visibility="Collapsed" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+
+                        <TabItem Header="Targets">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          CanContentScroll="False">
+                                <StackPanel Margin="4,8,4,24">
+                                    <TextBlock Text="Target reminders" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Choose when Log O'clock summarizes weekly and monthly progress"
+                                               Style="{StaticResource PageDescriptionTextStyle}" />
                     <CheckBox x:Name="TargetReviewNotificationCheck" Margin="0,28,0,8"
                               Content="Show scheduled weekly and monthly target review"
                               Style="{StaticResource ToggleSwitchStyle}"
@@ -1893,6 +1932,18 @@
                                          Style="{StaticResource TargetReviewChoiceStyle}" Checked="TargetReviewMonthWeek_Changed" />
                         </WrapPanel>
                     </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+
+                        <TabItem Header="Integrations">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          CanContentScroll="False">
+                                <StackPanel Margin="4,8,4,24">
+                                    <TextBlock Text="Integrations" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Profile-specific connections for tasks and exported logs"
+                                               Style="{StaticResource PageDescriptionTextStyle}" />
                     <TextBlock Text="Trello" FontSize="18" FontWeight="SemiBold" Margin="0,30,0,4" />
                     <TextBlock Text="Read-only task synchronization for this profile"
                                Foreground="{StaticResource MutedBrush}" Margin="0,0,0,10" />
@@ -1979,6 +2030,18 @@
                                        Text="A separate YYYY-MM-DD worksheet is used for each day. Entries explicitly deleted in Log O'clock are removed from Google Sheets; remote-only rows without a recorded local deletion are retained as recovery candidates. Sheets is a readable entry mirror, not an automatic database restore. The operational SQLite database and automatic daily database snapshots remain local so timers keep working offline. Google is contacted only when this profile is connected; OAuth secrets stay in Windows Credential Manager." />
                         </StackPanel>
                     </Border>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+
+                        <TabItem Header="Application">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          CanContentScroll="False">
+                                <StackPanel Margin="4,8,4,24">
+                                    <TextBlock Text="Application" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Startup, local storage, tray behavior, and product information"
+                                               Style="{StaticResource PageDescriptionTextStyle}" />
                     <CheckBox x:Name="AutostartCheck" Margin="0,24,0,8" Content="Launch Log O'clock when I sign in"
                               Style="{StaticResource ToggleSwitchStyle}"
                               Checked="AutostartCheck_Changed" Unchecked="AutostartCheck_Changed" />
@@ -1992,8 +2055,11 @@
                     <TextBlock x:Name="AboutProductText" Text="Log O'clock" FontWeight="SemiBold" />
                     <TextBlock x:Name="AboutAuthorText" Text="Created by Zachariasz Jędrzejczyk"
                                Foreground="{StaticResource MutedBrush}" Margin="0,3,0,24" />
-                </StackPanel>
-                </ScrollViewer>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </TabItem>
+                    </TabControl>
+                </Grid>
             </TabItem>
         </TabControl>
 

@@ -66,6 +66,7 @@ This map points a new context to the smallest relevant code surface. The root RE
 
 ### Settings
 
+- The page is divided into independently scrollable `Tracking`, `Idle & sessions`, `Targets`, `Integrations`, and `Application` subtabs while preserving the shared Codex-dark segmented navigation and existing control contracts.
 - Recognition, Windows session behaviour, call/video idle protection and live state.
 - Excluded-software, accumulated short-idle, recent-entry resume, and short-idle reporting thresholds.
 - Scheduled target review and launch at sign-in.
@@ -78,4 +79,3 @@ This map points a new context to the smallest relevant code surface. The root RE
 - `SqliteTrackerStoreTests.cs` is the main persistence/integration contract suite and covers most destructive or transactional behaviour.
 - API clients have request/response/redaction tests.
 - WPF interaction contracts live behind `PROJECT_TIME_TRACKER_SMOKE_VERIFY_*` flags in `App.xaml.cs`, with view-specific assertions in `MainWindow.xaml.cs` and dialog classes.
-

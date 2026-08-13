@@ -701,6 +701,28 @@ public partial class MainWindow : Window
         }
     }
 
+    internal void VerifySettingsCategoriesForPreview()
+    {
+        string[] expectedHeaders =
+        [
+            "Tracking",
+            "Idle & sessions",
+            "Targets",
+            "Integrations",
+            "Application",
+        ];
+        var tabs = SettingsCategoryTabs.Items.OfType<TabItem>().ToArray();
+        if (tabs.Length != expectedHeaders.Length ||
+            tabs.Where((tab, index) =>
+                    !string.Equals(tab.Header as string, expectedHeaders[index], StringComparison.Ordinal))
+                .Any() ||
+            tabs.Any(tab => tab.Content is not ScrollViewer))
+        {
+            throw new InvalidOperationException(
+                "Settings must retain its Tracking, Idle & sessions, Targets, Integrations, and Application categories.");
+        }
+    }
+
     internal void VerifyHistoryDefaultMonthForPreview(int year, int month)
     {
         var expectedStart = new DateTime(year, month, 1);
@@ -731,7 +753,7 @@ public partial class MainWindow : Window
             ReportInclusiveLegendItems, ReportGrid, ReportTargetsList,
             ReportSaveViewButton, ReportColumnsButton,
             SidebarTargetsPanel, SidebarTargetsResizeThumb, TargetsGrid, FloatingTargetsGrid,
-            RecognitionCheck, SessionBehaviorCombo, SessionBehaviorDescriptionText,
+            SettingsCategoryTabs, RecognitionCheck, SessionBehaviorCombo, SessionBehaviorDescriptionText,
             RecentEntryResumeMinutesText, RecentEntryResumeValidationText,
             CallsIdleProtectionCheck, VideoIdleProtectionCheck,
             IdleProtectionStatusText, IdleProtectionStatusDot, IdleProtectionPrivacyText,
@@ -749,6 +771,7 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("The redesigned shell is missing a required named feature control.");
         }
 
+        VerifySettingsCategoriesForPreview();
         VerifyTrelloUiForPreview();
 
         foreach (var titleBarButton in new[]

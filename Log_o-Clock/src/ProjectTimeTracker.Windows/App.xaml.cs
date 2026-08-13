@@ -1181,6 +1181,14 @@ public partial class App : System.Windows.Application
                 }
 
                 if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_SETTINGS_CATEGORIES"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    _mainWindow.VerifySettingsCategoriesForPreview();
+                }
+
+                if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_TRELLO_UI"),
                         "true",
                         StringComparison.OrdinalIgnoreCase))
