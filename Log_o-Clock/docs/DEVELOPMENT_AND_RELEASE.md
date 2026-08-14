@@ -135,6 +135,8 @@ For a release, update together:
 
 Then verify the published executable's `FileVersion`/`ProductVersion`, run the packaged smoke scenario, and check MSI signature status.
 
+Publish a non-draft, non-prerelease GitHub Release tagged `v<version>` with the matching MSI attached. Installed copies use that published release as their update-discovery source and open its GitHub release page for the user to download the installer.
+
 ## Source archive convention
 
 Release source archives exclude generated or environment-owned directories:
@@ -175,4 +177,3 @@ tar.exe -a -c -f outputs\LogOClock-source-<version>.zip `
 - Use cancellation and single-flight synchronization.
 - Preserve offline local data on any network, authentication, rate-limit, or parsing failure.
 - Never log or display raw credentials.
-

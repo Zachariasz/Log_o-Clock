@@ -132,6 +132,11 @@ public interface ITrelloApiClient
     Task<IReadOnlyList<TrelloCard>> GetCardsAsync(TrelloCredentials credentials, string boardId, CancellationToken cancellationToken = default);
 }
 
+public interface IGitHubReleaseClient
+{
+    Task<GitHubRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken = default);
+}
+
 public interface ITrelloSyncService : IAsyncDisposable
 {
     event EventHandler<TrelloSyncResult>? SyncCompleted;
@@ -148,7 +153,13 @@ public interface ITrelloSyncService : IAsyncDisposable
     void Start();
 }
 
-public interface ITrackerStore : IAsyncDisposable
+public interface IUpdateSettingsStore
+{
+    Task<string?> GetSettingAsync(string key, CancellationToken cancellationToken = default);
+    Task SetSettingAsync(string key, string value, CancellationToken cancellationToken = default);
+}
+
+public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
 {
     string DatabasePath { get; }
     Task InitializeAsync(CancellationToken cancellationToken = default);
@@ -280,6 +291,4 @@ public interface ITrackerStore : IAsyncDisposable
     Task<IReadOnlyList<Guid>> GetGoogleSheetsEntryDeletionIdsAsync(CancellationToken cancellationToken = default);
     Task CompleteGoogleSheetsEntryDeletionsAsync(IReadOnlyCollection<Guid> entryIds, CancellationToken cancellationToken = default);
 
-    Task<string?> GetSettingAsync(string key, CancellationToken cancellationToken = default);
-    Task SetSettingAsync(string key, string value, CancellationToken cancellationToken = default);
 }

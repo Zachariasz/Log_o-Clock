@@ -70,6 +70,7 @@ public partial class MainWindow : Window
     private readonly IAutostartService _autostart;
     private readonly ITrelloSyncService _trelloSync;
     private readonly IGoogleSheetsSyncService _googleSheetsSync;
+    private readonly UpdateCheckService _updateCheck;
     private readonly ProfileCatalog _profileCatalog;
     private readonly Func<Guid, Guid?, Task<bool>> _requestProfileSwitch;
     private readonly SemaphoreSlim _timerActionGate = new(1, 1);
@@ -214,6 +215,7 @@ public partial class MainWindow : Window
         IAutostartService autostart,
         ITrelloSyncService trelloSync,
         IGoogleSheetsSyncService googleSheetsSync,
+        UpdateCheckService updateCheck,
         ProfileCatalog profileCatalog,
         TrackerProfile activeProfile,
         Func<Guid, Guid?, Task<bool>> requestProfileSwitch)
@@ -224,6 +226,7 @@ public partial class MainWindow : Window
         _autostart = autostart;
         _trelloSync = trelloSync;
         _googleSheetsSync = googleSheetsSync;
+        _updateCheck = updateCheck;
         _profileCatalog = profileCatalog;
         _activeProfile = activeProfile;
         _requestProfileSwitch = requestProfileSwitch;
@@ -236,6 +239,7 @@ public partial class MainWindow : Window
         _controller.IdleProtectionChanged += Controller_IdleProtectionChanged;
         _trelloSync.SyncCompleted += TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted += GoogleSheetsSync_SyncCompleted;
+        _updateCheck.StateChanged += UpdateCheck_StateChanged;
         _defaultHistoryView = CaptureHistoryView();
         _savedHistoryView = _defaultHistoryView;
         BuildHistoryColumnsMenu();
@@ -267,6 +271,7 @@ public partial class MainWindow : Window
         _controller.IdleProtectionChanged -= Controller_IdleProtectionChanged;
         _trelloSync.SyncCompleted -= TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted -= GoogleSheetsSync_SyncCompleted;
+        _updateCheck.StateChanged -= UpdateCheck_StateChanged;
         base.OnClosed(e);
     }
 
@@ -701,6 +706,32 @@ public partial class MainWindow : Window
         }
     }
 
+    internal void VerifyUpdateNoticeForPreview()
+    {
+        if (UpdateBellButton.Visibility != Visibility.Visible ||
+            FloatingUpdateBellButton.Visibility != Visibility.Visible ||
+            OpenUpdateReleaseButton.Visibility != Visibility.Visible ||
+            !UpdateStatusText.Text.Contains("999.0.0", StringComparison.Ordinal) ||
+            ToolTipService.GetInitialShowDelay(UpdateBellButton) != 1000 ||
+            ToolTipService.GetInitialShowDelay(FloatingUpdateBellButton) != 1000)
+        {
+            throw new InvalidOperationException(
+                "The available-update bell or Application update card is incomplete.");
+        }
+
+        var mainTabIndex = MainTabs.SelectedIndex;
+        var settingsCategoryIndex = SettingsCategoryTabs.SelectedIndex;
+        UpdateBell_Click(UpdateBellButton, new RoutedEventArgs());
+        if (MainTabs.SelectedIndex != 3 || SettingsCategoryTabs.SelectedIndex != 4)
+        {
+            throw new InvalidOperationException(
+                "The available-update bell did not open Settings > Application.");
+        }
+
+        MainTabs.SelectedIndex = mainTabIndex;
+        SettingsCategoryTabs.SelectedIndex = settingsCategoryIndex;
+    }
+
     internal void VerifySettingsCategoriesForPreview()
     {
         string[] expectedHeaders =
@@ -762,7 +793,9 @@ public partial class MainWindow : Window
             ShortIdleReportingMinutesText, ShortIdleReportingValidationText,
             TargetReviewNotificationCheck, TargetReviewSchedulePanel,
             TargetReviewMonday, TargetReviewFirstWeek,
-            AutostartCheck, DatabasePathText,
+            AutostartCheck, UpdateChecksEnabledCheck, UpdateInstalledVersionText, UpdateStatusText,
+            CheckForUpdatesButton, OpenUpdateReleaseButton, UpdateBellButton, FloatingUpdateBellButton,
+            DatabasePathText,
             TrelloConnectionText, TrelloSyncStatusText,
             TrelloConnectButton, TrelloSyncButton, TrelloDisconnectButton, TrelloMappingsGrid,
         };
@@ -2528,6 +2561,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void UpdateBell_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        MainTabs.SelectedIndex = 3;
+        SettingsCategoryTabs.SelectedIndex = 4;
+        NavigationPopup.IsOpen = false;
+        SettingsCategoryTabs.Focus();
+    }
+
     private void ApplyResponsiveLayout(double width)
     {
         if (MainTabs is null || TitleSidebarColumn is null || TimerSidebarColumn is null || SidebarTargetsPanel is null)
@@ -2862,6 +2905,7 @@ public partial class MainWindow : Window
             _controller.ShortIdleReportingMaximumMinutes.ToString(CultureInfo.CurrentCulture);
         SetTargetReviewScheduleControls(_controller.TargetReviewSchedule);
         AutostartCheck.IsChecked = _autostart.IsEnabled;
+        UpdateUpdateControls(_updateCheck.State);
         DatabasePathText.Text = Path.GetDirectoryName(_store.DatabasePath) ?? _store.DatabasePath;
         _sidebarTargetsPanelPreferredHeight = SidebarTargetsPanelSettings.ParseHeight(
             await _store.GetSettingAsync(SidebarTargetsPanelSettings.HeightKey));
@@ -2889,6 +2933,106 @@ public partial class MainWindow : Window
         _ = sender;
         _ = result;
         _ = Dispatcher.InvokeAsync(RefreshGoogleSheetsAsync);
+    }
+
+    private void UpdateCheck_StateChanged(object? sender, UpdateCheckState state)
+    {
+        _ = sender;
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.InvokeAsync(() => UpdateUpdateControls(state));
+            return;
+        }
+
+        UpdateUpdateControls(state);
+    }
+
+    private void UpdateUpdateControls(UpdateCheckState state)
+    {
+        UpdateChecksEnabledCheck.IsChecked = state.AutomaticChecksEnabled;
+        UpdateInstalledVersionText.Text = $"Installed version {state.InstalledVersion.ToString(3)}";
+        OpenUpdateReleaseButton.Visibility = state.IsUpdateAvailable
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        var bellVisibility = state.IsUpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
+        UpdateBellButton.Visibility = bellVisibility;
+        FloatingUpdateBellButton.Visibility = bellVisibility;
+
+        if (state.Status == UpdateCheckStatus.UpdateAvailable && state.LatestVersion is not null)
+        {
+            UpdateStatusText.Text = $"Version {state.LatestVersion.ToString(3)} is available on GitHub.";
+            UpdateStatusText.Foreground = (Brush)FindResource("WarningBrush");
+            return;
+        }
+
+        if (state.IsUpdateAvailable && state.LatestVersion is not null)
+        {
+            UpdateStatusText.Text = $"Version {state.LatestVersion.ToString(3)} is available on GitHub. {state.ErrorMessage}";
+            UpdateStatusText.Foreground = (Brush)FindResource("WarningBrush");
+            return;
+        }
+
+        UpdateStatusText.Foreground = (Brush)FindResource("ContentSecondaryBrush");
+        UpdateStatusText.Text = state.Status switch
+        {
+            UpdateCheckStatus.UpToDate => $"You’re up to date. Last checked {FormatUpdateCheckTime(state.LastSuccessfulCheckUtc)}.",
+            UpdateCheckStatus.NoRelease => $"No published GitHub release is available yet. Last checked {FormatUpdateCheckTime(state.LastSuccessfulCheckUtc)}.",
+            UpdateCheckStatus.Failed => state.ErrorMessage ?? "Could not check for updates.",
+            _ when !state.AutomaticChecksEnabled => "Automatic update checks are off. You can still check manually.",
+            _ => "Updates have not been checked yet.",
+        };
+    }
+
+    private static string FormatUpdateCheckTime(DateTimeOffset? timestamp) =>
+        timestamp is null
+            ? "never"
+            : TimeZoneInfo.ConvertTime(timestamp.Value, TimeZoneInfo.Local)
+                .ToString("dd MMM yyyy HH:mm", CultureInfo.CurrentCulture);
+
+    private async void UpdateChecksEnabledCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading)
+        {
+            return;
+        }
+
+        try
+        {
+            await _updateCheck.SetAutomaticChecksEnabledAsync(UpdateChecksEnabledCheck.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            UpdateUpdateControls(_updateCheck.State);
+            ShowError("Could not update update-check preference", exception);
+        }
+    }
+
+    private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        CheckForUpdatesButton.IsEnabled = false;
+        try
+        {
+            await _updateCheck.CheckManuallyAsync();
+        }
+        finally
+        {
+            CheckForUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private void OpenUpdateRelease_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        var releasePageUri = _updateCheck.State.ReleasePageUri;
+        if (_updateCheck.State.IsUpdateAvailable && releasePageUri is not null)
+        {
+            _ = Process.Start(new ProcessStartInfo(releasePageUri.AbsoluteUri) { UseShellExecute = true });
+        }
     }
 
     private async Task RefreshGoogleSheetsAsync()

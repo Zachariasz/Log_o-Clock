@@ -693,6 +693,101 @@ public static class TargetReviewSettings
         localDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 }
 
+public sealed record GitHubRelease(string TagName, Uri ReleasePageUri);
+
+public enum UpdateCheckStatus
+{
+    NotChecked,
+    UpToDate,
+    UpdateAvailable,
+    NoRelease,
+    Failed,
+}
+
+public sealed record UpdateCheckState(
+    bool AutomaticChecksEnabled,
+    UpdateCheckStatus Status,
+    Version InstalledVersion,
+    Version? LatestVersion,
+    Uri? ReleasePageUri,
+    DateTimeOffset? LastSuccessfulCheckUtc,
+    string? ErrorMessage)
+{
+    public bool IsUpdateAvailable => LatestVersion is not null &&
+                                     LatestVersion.CompareTo(InstalledVersion) > 0 &&
+                                     ReleasePageUri is not null;
+}
+
+public static class UpdateCheckSettings
+{
+    public const string AutomaticChecksEnabledKey = "updates.automatic-checks.enabled";
+    public const string LastSuccessfulCheckUtcKey = "updates.last-successful-check-utc";
+    public const string LatestVersionKey = "updates.latest-version";
+    public const string ReleasePageUrlKey = "updates.release-page-url";
+    public const string LastResultKey = "updates.last-result";
+    public const string NoReleaseResult = "no-release";
+    public const string ReleaseResult = "release";
+    public static readonly TimeSpan AutomaticCheckInterval = TimeSpan.FromHours(24);
+
+    public static bool ParseAutomaticChecksEnabled(string? value) =>
+        !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase);
+
+    public static bool TryParseReleaseVersion(string? value, out Version version)
+    {
+        version = new Version();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var normalized = value.Trim();
+        if (normalized.StartsWith('v') || normalized.StartsWith('V'))
+        {
+            normalized = normalized[1..];
+        }
+
+        var parts = normalized.Split('.', StringSplitOptions.None);
+        if (parts.Length != 3 || parts.Any(part =>
+                !int.TryParse(
+                    part,
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out _)))
+        {
+            return false;
+        }
+
+        if (Version.TryParse(normalized, out var parsedVersion) && parsedVersion is not null)
+        {
+            version = parsedVersion;
+            return true;
+        }
+
+        return false;
+    }
+
+    public static bool TryParseUtc(string? value, out DateTimeOffset timestamp) =>
+        DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out timestamp);
+
+    public static bool TryParseGitHubReleasePageUri(string? value, out Uri? uri)
+    {
+        if (Uri.TryCreate(value, UriKind.Absolute, out var candidate) &&
+            string.Equals(candidate.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(candidate.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            uri = candidate;
+            return true;
+        }
+
+        uri = null;
+        return false;
+    }
+}
+
 public sealed record TargetReviewItem(
     Guid ProjectId,
     string ClientName,

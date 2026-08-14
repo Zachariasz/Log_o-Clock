@@ -28,6 +28,8 @@ public partial class App : System.Windows.Application
     private TrelloSyncService? _trelloSync;
     private GoogleSheetsApiClient? _googleSheetsApiClient;
     private GoogleSheetsSyncService? _googleSheetsSync;
+    private IDisposable? _updateReleaseClient;
+    private UpdateCheckService? _updateCheck;
     private EntryDetailsWindow? _detailsWindow;
     private Guid? _runningEntryId;
     private string _runningLabel = "Tracking";
@@ -305,6 +307,19 @@ public partial class App : System.Windows.Application
                 _activeProfile.Id,
                 _activeProfile.Name,
                 clock);
+            IGitHubReleaseClient updateReleaseClient = smokeTest
+                ? new FixedGitHubReleaseClient(
+                    new GitHubRelease(
+                        "v999.0.0",
+                        new Uri("https://github.com/Zachariasz/Log_o-Clock/releases/tag/v999.0.0")))
+                : new GitHubReleaseClient();
+            _updateReleaseClient = updateReleaseClient as IDisposable;
+            _updateCheck = new UpdateCheckService(
+                _store,
+                updateReleaseClient,
+                clock,
+                typeof(App).Assembly.GetName().Version ?? new Version(0, 0, 0));
+            await _updateCheck.InitializeAsync();
             _runningEntryId = _controller.RunningEntry?.Id;
             _controller.DetailsRequested += Controller_DetailsRequested;
             _controller.RunningEntryChanged += Controller_RunningEntryChanged;
@@ -317,6 +332,7 @@ public partial class App : System.Windows.Application
                 autostart,
                 _trelloSync,
                 _googleSheetsSync,
+                _updateCheck,
                 _profileCatalog,
                 _activeProfile,
                 RequestProfileSwitchAsync);
@@ -336,6 +352,10 @@ public partial class App : System.Windows.Application
             if (!verifySessionRecovery)
             {
                 await _controller.ShowPendingSessionNotificationAsync();
+            }
+            if (!smokeTest)
+            {
+                _ = _updateCheck.CheckAutomaticallyAsync();
             }
 
             if (smokeTest)
@@ -364,6 +384,9 @@ public partial class App : System.Windows.Application
                 {
                     await Task.Delay(100);
                 }
+
+                await _updateCheck.CheckManuallyAsync();
+                _mainWindow.VerifyUpdateNoticeForPreview();
 
                 if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_ENGLISH_UI"),
@@ -4916,7 +4939,19 @@ public partial class App : System.Windows.Application
         _trelloApiClient = null;
         _googleSheetsApiClient?.Dispose();
         _googleSheetsApiClient = null;
+        _updateReleaseClient?.Dispose();
+        _updateReleaseClient = null;
+        _updateCheck = null;
         _singleInstance?.Dispose();
         _singleInstance = null;
+    }
+
+    private sealed class FixedGitHubReleaseClient(GitHubRelease? release) : IGitHubReleaseClient
+    {
+        public Task<GitHubRelease?> GetLatestReleaseAsync(CancellationToken cancellationToken = default)
+        {
+            _ = cancellationToken;
+            return Task.FromResult(release);
+        }
     }
 }

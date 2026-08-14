@@ -389,7 +389,23 @@
                     <Button Content="History" Tag="0" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
                     <Button Content="Clients &amp; Projects" Tag="1" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
                     <Button Content="Reports" Tag="2" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
-                    <Button Content="Settings" Tag="3" HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="FloatingSettingsNavigationButton" Content="Settings" Tag="3"
+                                HorizontalContentAlignment="Left" Click="FloatingNavigation_Click" />
+                        <Button x:Name="FloatingUpdateBellButton" Grid.Column="1" Style="{StaticResource IconButton}"
+                                Margin="0,0,4,0" Visibility="Collapsed" Click="UpdateBell_Click"
+                                ToolTip="A new version of Log O'clock is available. Open Settings to learn more."
+                                ToolTipService.InitialShowDelay="1000"
+                                AutomationProperties.Name="Open available update details">
+                            <Path Data="{StaticResource Icon.Bell}" Stroke="{StaticResource WarningBrush}" StrokeThickness="2"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="16" Height="16" />
+                        </Button>
+                    </Grid>
                     <Separator Margin="4,8" />
                     <TextBlock Text="TARGETS" Margin="8,0,8,4" Foreground="{StaticResource ContentTertiaryBrush}"
                                FontSize="10" FontWeight="SemiBold" />
@@ -1732,7 +1748,25 @@
                 </Grid>
             </TabItem>
 
-            <TabItem Header="Settings">
+            <TabItem>
+                <TabItem.Header>
+                    <Grid Width="227">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Settings" VerticalAlignment="Center" />
+                        <Button x:Name="UpdateBellButton" Grid.Column="1" Style="{StaticResource IconButton}"
+                                Margin="4,-5,-8,-5" Visibility="Collapsed" Click="UpdateBell_Click"
+                                ToolTip="A new version of Log O'clock is available. Open Settings to learn more."
+                                ToolTipService.InitialShowDelay="1000"
+                                AutomationProperties.Name="Open available update details">
+                            <Path Data="{StaticResource Icon.Bell}" Stroke="{StaticResource WarningBrush}" StrokeThickness="2"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"
+                                  Width="16" Height="16" />
+                        </Button>
+                    </Grid>
+                </TabItem.Header>
                 <Grid Margin="32,24" MaxWidth="768" HorizontalAlignment="Stretch">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
@@ -2045,6 +2079,32 @@
                     <CheckBox x:Name="AutostartCheck" Margin="0,24,0,8" Content="Launch Log O'clock when I sign in"
                               Style="{StaticResource ToggleSwitchStyle}"
                               Checked="AutostartCheck_Changed" Unchecked="AutostartCheck_Changed" />
+                    <TextBlock Text="Updates" FontSize="18" FontWeight="SemiBold" Margin="0,28,0,4" />
+                    <TextBlock Text="Keep Log O'clock informed about published GitHub releases"
+                               Style="{StaticResource PageDescriptionTextStyle}" />
+                    <CheckBox x:Name="UpdateChecksEnabledCheck" Margin="0,18,0,8"
+                              Content="Check GitHub for new versions automatically"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="UpdateChecksEnabledCheck_Changed"
+                              Unchecked="UpdateChecksEnabledCheck_Changed" />
+                    <TextBlock Text="A check contacts GitHub's public release service and shares your IP address with GitHub. No tracking data or profile information is sent."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" />
+                    <Border Margin="0,14,0,0" Padding="12" Background="{StaticResource StateHoverBrush}"
+                            BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                            CornerRadius="{StaticResource Radius.Navigation}">
+                        <StackPanel>
+                            <TextBlock x:Name="UpdateInstalledVersionText" FontWeight="SemiBold" />
+                            <TextBlock x:Name="UpdateStatusText" Margin="0,4,0,0" TextWrapping="Wrap"
+                                       Foreground="{StaticResource ContentSecondaryBrush}"
+                                       AutomationProperties.LiveSetting="Polite" />
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button x:Name="CheckForUpdatesButton" Content="Check for updates"
+                                        Click="CheckForUpdates_Click" />
+                                <Button x:Name="OpenUpdateReleaseButton" Content="Open release page" Margin="8,0,0,0"
+                                        Visibility="Collapsed" Click="OpenUpdateRelease_Click" />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
                     <TextBlock Text="Storage folder" FontWeight="SemiBold" Margin="0,28,0,5" />
                     <TextBox x:Name="DatabasePathText" IsReadOnly="True" />
                     <TextBlock Text="Active data is kept in TimeTracker.db. Safety snapshots are saved under Daily Backups. Local mode writes one CSV per day under Daily Logs and retains older revisions; Google Sheets mode sends those daily log exports to one worksheet per day. Existing monthly CSV files remain compatible."
