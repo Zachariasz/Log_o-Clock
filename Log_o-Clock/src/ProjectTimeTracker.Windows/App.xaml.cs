@@ -1357,6 +1357,87 @@ public partial class App : System.Windows.Application
                 }
 
                 if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_TARGET_DIALOG_LAYOUT"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var dialog = _mainWindow.CreateTargetSettingsWindowForPreview();
+                    dialog.Show();
+                    dialog.VerifyLayoutForPreview();
+                    dialog.Close();
+                }
+
+                if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_BREAK_REMINDER"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    await _mainWindow.VerifyBreakReminderSettingsForPreviewAsync();
+                    var client = await _store.AddClientAsync(
+                        $"Break reminder client {Guid.NewGuid():N}",
+                        "#766F80");
+                    var firstProject = await _store.AddProjectAsync(
+                        client.Id,
+                        $"Break reminder first {Guid.NewGuid():N}",
+                        "#339CFF");
+                    var secondProject = await _store.AddProjectAsync(
+                        client.Id,
+                        $"Break reminder second {Guid.NewGuid():N}",
+                        "#40C977");
+                    var started = await _controller.StartTimerAsync(
+                        firstProject.Id,
+                        TrackingSource.Manual,
+                        showDetails: false);
+                    var now = _controller.UtcNow;
+                    await _controller.UpdateRunningStartAsync(
+                        started.Id,
+                        now.AddMinutes(-10));
+                    await _controller.AddIdleIntervalForPreviewAsync(
+                        now.AddMinutes(-7),
+                        now.AddMinutes(-1),
+                        remove: true);
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 240 or > 241)
+                    {
+                        throw new InvalidOperationException(
+                            "Break reminders counted excluded idle time.");
+                    }
+
+                    var switched = await _controller.ContinueTimerAsync(
+                        secondProject.Id,
+                        taskId: null,
+                        description: null);
+                    await _controller.UpdateRunningStartAsync(
+                        switched.Id,
+                        _controller.UtcNow.AddMinutes(-2));
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 360 or > 361)
+                    {
+                        throw new InvalidOperationException(
+                            "Break reminders did not retain the streak across a project switch.");
+                    }
+
+                    var ripped = await _controller.RipRunningEntryAsync(
+                        switched.Id,
+                        switched.ProjectId,
+                        taskId: null,
+                        description: null);
+                    await _controller.UpdateRunningStartAsync(
+                        ripped.Id,
+                        _controller.UtcNow.AddMinutes(-2));
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 480 or > 481)
+                    {
+                        throw new InvalidOperationException(
+                            "Break reminders did not retain the streak across a rip.");
+                    }
+
+                    await _controller.StopTimerAsync();
+                    if (_controller.BreakReminderStreakSecondsForPreview != 0)
+                    {
+                        throw new InvalidOperationException(
+                            "Stopping the timer did not reset the break reminder streak.");
+                    }
+                }
+
+                if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_SIDEBAR_TARGET_SELECTION"),
                         "true",
                         StringComparison.OrdinalIgnoreCase))
@@ -1605,6 +1686,69 @@ public partial class App : System.Windows.Application
                         StringComparison.OrdinalIgnoreCase))
                 {
                     await _mainWindow.VerifyHistoryFiltersForPreviewAsync();
+                }
+
+                if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_HISTORY_GLOBAL_SORT"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var projectAClient = await _store.AddClientAsync(
+                        $"Z History sort client {Guid.NewGuid():N}",
+                        "#766F80");
+                    var projectBClient = await _store.AddClientAsync(
+                        $"A History sort client {Guid.NewGuid():N}",
+                        "#687582");
+                    var projectB = await _store.AddProjectAsync(
+                        projectBClient.Id,
+                        "B History sorting",
+                        "#0D8F68");
+                    var projectA = await _store.AddProjectAsync(
+                        projectAClient.Id,
+                        "A History sorting",
+                        "#339CFF");
+                    var taskA = await _store.AddTaskAsync(projectA.Id, "History sorting task");
+                    var taskB = await _store.AddTaskAsync(projectB.Id, "History sorting task");
+                    var now = DateTimeOffset.UtcNow;
+                    await _store.AddManualEntryAsync(
+                        projectB.Id,
+                        taskB.Id,
+                        null,
+                        now.AddDays(-2),
+                        now.AddDays(-2).AddMinutes(10));
+                    await _store.AddManualEntryAsync(
+                        projectA.Id,
+                        taskA.Id,
+                        null,
+                        now.AddDays(-1),
+                        now.AddDays(-1).AddMinutes(10));
+                    await _store.AddManualEntryAsync(
+                        projectA.Id,
+                        taskA.Id,
+                        null,
+                        now.AddHours(-3),
+                        now.AddHours(-2));
+                    var seededEntries = await _store.GetEntriesAsync(
+                        now.AddDays(-3),
+                        now.AddHours(-1));
+                    var expectedProjectEntryIds = seededEntries
+                        .Where(entry => entry.ProjectId == projectA.Id)
+                        .OrderByDescending(entry => entry.StartUtc)
+                        .Select(entry => entry.Id)
+                        .Append(seededEntries.Single(entry => entry.ProjectId == projectB.Id).Id)
+                        .ToArray();
+                    var expectedClientEntryIds = seededEntries
+                        .Where(entry => entry.ProjectId == projectB.Id)
+                        .Select(entry => entry.Id)
+                        .Concat(seededEntries
+                            .Where(entry => entry.ProjectId == projectA.Id)
+                            .OrderByDescending(entry => entry.StartUtc)
+                            .Select(entry => entry.Id))
+                        .ToArray();
+                    await _mainWindow.RefreshAllAsync();
+                    _mainWindow.VerifyHistoryGlobalProjectSortingForPreview(
+                        expectedProjectEntryIds,
+                        expectedClientEntryIds);
                 }
 
                 if (string.Equals(
@@ -4130,6 +4274,51 @@ public partial class App : System.Windows.Application
                         SaveWindowPreview(reminder, screenshotPath);
                         reminder.Close();
                     }
+                    else if (string.Equals(smokeView, "BreakReminder", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var placement in new[]
+                                 {
+                                     BreakReminderPlacement.BottomRight,
+                                     BreakReminderPlacement.ScreenCenter,
+                                 })
+                        {
+                            var reminder = new BreakReminderWindow(placement);
+                            reminder.Show();
+                            await Task.Delay(150);
+                            reminder.UpdateLayout();
+                            var workArea = SystemParameters.WorkArea;
+                            var expectedLeft = placement == BreakReminderPlacement.BottomRight
+                                ? workArea.Right - reminder.ActualWidth - 16
+                                : workArea.Left + (workArea.Width - reminder.ActualWidth) / 2;
+                            var expectedTop = placement == BreakReminderPlacement.BottomRight
+                                ? workArea.Bottom - reminder.ActualHeight - 16
+                                : workArea.Top + (workArea.Height - reminder.ActualHeight) / 2;
+                            if (!string.Equals(
+                                    reminder.MessageText.Text,
+                                    "Take a break!",
+                                    StringComparison.Ordinal) ||
+                                !reminder.IsDismissTimerRunningForPreview ||
+                                reminder.PlacementForPreview != placement ||
+                                Math.Abs(reminder.Left - expectedLeft) > 1 ||
+                                Math.Abs(reminder.Top - expectedTop) > 1)
+                            {
+                                throw new InvalidOperationException(
+                                    "The break reminder content, placement, or automatic dismissal is incomplete.");
+                            }
+
+                            if (placement == BreakReminderPlacement.BottomRight)
+                            {
+                                SaveWindowPreview(reminder, screenshotPath);
+                            }
+
+                            await Task.Delay(TimeSpan.FromSeconds(3.2));
+                            if (reminder.IsVisible)
+                            {
+                                throw new InvalidOperationException(
+                                    "The break reminder did not close automatically after 3 seconds.");
+                            }
+                        }
+                    }
                     else if (string.Equals(smokeView, "RuleDialog", StringComparison.OrdinalIgnoreCase))
                     {
                         var projects = await _store.GetProjectOptionsAsync();
@@ -4890,7 +5079,10 @@ public partial class App : System.Windows.Application
                     ? (entryId, startUtc) =>
                         _controller.UpdateRunningStartAsync(entryId, startUtc)
                     : null,
-            heading: request.Heading);
+            heading: request.Heading,
+            taskOrigin: request.Source == TrackingSource.WindowReminder
+                ? SavedTaskOrigin.Notification
+                : SavedTaskOrigin.Local);
         _detailsWindow = window;
         window.DetailsSaved += (_, details) =>
             _controller?.NotifyEntryDetailsChanged(

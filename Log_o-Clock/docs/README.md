@@ -1,6 +1,6 @@
 # Log O'clock developer documentation
 
-This folder is the starting point for a new development context. The documents describe the application as implemented in source at version **1.142.2** and SQLite schema **23**.
+This folder is the starting point for a new development context. The documents describe the application as implemented in source at version **1.142.2** and SQLite schema **24**.
 
 The root [AGENTS.md](../AGENTS.md) is the concise automatic coding-context entry point and links back to this set.
 

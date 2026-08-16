@@ -9,6 +9,7 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
 {
     private Window? _active;
     private TargetReviewWindow? _targetReview;
+    private BreakReminderWindow? _breakReminder;
     private bool _disposed;
 
     public async Task<ReminderResponse> ShowProjectReminderAsync(
@@ -120,6 +121,32 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
         });
     }
 
+    public async Task ShowBreakReminderAsync(
+        BreakReminderPlacement placement,
+        CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+
+        await dispatcher.InvokeAsync(() =>
+        {
+            _breakReminder?.Close();
+            var window = new BreakReminderWindow(placement);
+            _breakReminder = window;
+            window.Closed += (_, _) =>
+            {
+                if (ReferenceEquals(_breakReminder, window))
+                {
+                    _breakReminder = null;
+                }
+            };
+            window.Show();
+        });
+    }
+
     public void DismissActive()
     {
         if (!dispatcher.CheckAccess())
@@ -150,10 +177,15 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
         if (dispatcher.CheckAccess())
         {
             _targetReview?.Close();
+            _breakReminder?.Close();
         }
         else
         {
-            dispatcher.BeginInvoke(() => _targetReview?.Close());
+            dispatcher.BeginInvoke(() =>
+            {
+                _targetReview?.Close();
+                _breakReminder?.Close();
+            });
         }
     }
 }

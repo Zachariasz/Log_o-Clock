@@ -20,6 +20,7 @@ public partial class EntryDetailsWindow : Window
     private Guid _entryId;
     private Guid _projectId;
     private readonly bool _allowProjectSelection;
+    private readonly SavedTaskOrigin _taskOrigin;
     private readonly SemaphoreSlim _saveGate = new(1, 1);
     private DateTimeOffset? _runningStartUtc;
     private bool _suppressAutoClose;
@@ -67,7 +68,8 @@ public partial class EntryDetailsWindow : Window
         bool allowProjectSelection = false,
         DateTimeOffset? runningStartUtc = null,
         Func<Guid, DateTimeOffset, Task<TimeEntry>>? updateRunningStart = null,
-        string? heading = null)
+        string? heading = null,
+        SavedTaskOrigin taskOrigin = SavedTaskOrigin.Local)
     {
         InitializeComponent();
         _store = store;
@@ -77,6 +79,7 @@ public partial class EntryDetailsWindow : Window
         _entryId = entryId;
         _projectId = projectId;
         _allowProjectSelection = allowProjectSelection;
+        _taskOrigin = taskOrigin;
         _runningStartUtc = runningStartUtc?.ToUniversalTime();
         ApplyHeading(heading);
 
@@ -840,7 +843,7 @@ public partial class EntryDetailsWindow : Window
             return selectedTask.Id;
         }
 
-        var task = await _store.GetOrAddTaskAsync(_projectId, taskName);
+        var task = await _store.GetOrAddTaskAsync(_projectId, taskName, _taskOrigin);
         await ReloadTasksAsync(task.Id);
         TaskCombo.Text = task.Name;
         return task.Id;

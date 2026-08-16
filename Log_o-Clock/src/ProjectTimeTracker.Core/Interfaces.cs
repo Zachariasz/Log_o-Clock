@@ -55,6 +55,10 @@ public interface INotificationService : IDisposable
         IReadOnlyList<TargetReviewItem> items,
         CancellationToken cancellationToken = default);
 
+    Task ShowBreakReminderAsync(
+        BreakReminderPlacement placement,
+        CancellationToken cancellationToken = default);
+
     void DismissActive();
 }
 
@@ -187,7 +191,11 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<Client> AddClientAsync(string name, string color, CancellationToken cancellationToken = default);
     Task<Project> AddProjectAsync(Guid clientId, string name, string color, CancellationToken cancellationToken = default);
     Task<SavedTask> AddTaskAsync(Guid projectId, string name, CancellationToken cancellationToken = default);
-    Task<SavedTask> GetOrAddTaskAsync(Guid projectId, string name, CancellationToken cancellationToken = default);
+    Task<SavedTask> GetOrAddTaskAsync(
+        Guid projectId,
+        string name,
+        SavedTaskOrigin origin = SavedTaskOrigin.Local,
+        CancellationToken cancellationToken = default);
     Task<TagDefinition> GetOrAddTagAsync(string name, Guid? projectId = null, CancellationToken cancellationToken = default);
     Task<TagDefinition> AddTagAsync(string name, string color, Guid? projectId = null, CancellationToken cancellationToken = default);
     Task<SoftwareDefinition> AddSoftwareAsync(string processName, string label, Guid projectId, bool isExcluded, IReadOnlyCollection<Guid> tagIds, CancellationToken cancellationToken = default);

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using ProjectTimeTracker.Core;
+using ProjectTimeTracker.Windows.Services;
 
 namespace ProjectTimeTracker.Windows.Views;
 
@@ -66,6 +67,19 @@ public partial class TargetSettingsWindow : Window
     }
 
     public TargetSettingsResult? Result { get; private set; }
+
+    internal void VerifyLayoutForPreview()
+    {
+        ValidationText.Text = "Enter hours greater than zero.";
+        UpdateLayout();
+        VisualLayoutVerifier.VerifyVisibleElementsFitWithin(ContentPanel, "target settings");
+
+        if (!SaveButton.IsVisible || !SaveButton.IsArrangeValid ||
+            SaveButton.ActualWidth <= 0 || SaveButton.ActualHeight <= 0)
+        {
+            throw new InvalidOperationException("The target settings Save button is not visible.");
+        }
+    }
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {

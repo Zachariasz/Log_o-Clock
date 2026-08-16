@@ -6,7 +6,7 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed class SqliteTrackerStore : ITrackerStore
 {
-    private const int SchemaVersion = 23;
+    private const int SchemaVersion = 24;
     private static readonly TimeSpan MinimumEntryDuration = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly TimeZoneInfo _monthlyLogTimeZone;
@@ -182,10 +182,16 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 await ExecuteAsync(connection, MigrationV21Sql, cancellationToken);
             }
 
+            if (version < 24)
+            {
+                await ExecuteAsync(connection, MigrationV24Sql, cancellationToken);
+            }
+
             await ExecuteAsync(connection, SchemaV21IndexesSql, cancellationToken);
 
             await EnsureSystemEntitiesAsync(connection, cancellationToken);
             await DeleteSubMinuteCompletedEntriesAsync(connection, transaction: null, entryId: null, cancellationToken);
+            await DeleteUnusedNotificationTasksAsync(connection, transaction: null, cancellationToken);
             await SynchronizeTagsFromDescriptionsAsync(connection, cancellationToken);
             await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken);
         }
@@ -281,6 +287,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$recovered", Format(recoveredAtUtc)),
             ("$unassigned", SystemEntityIds.UnassignedProjectId.ToString("D")));
         await DeleteSubMinuteCompletedEntriesAsync(connection, transaction, entryId: null, cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -1380,9 +1387,15 @@ public sealed class SqliteTrackerStore : ITrackerStore
     public async Task<SavedTask> GetOrAddTaskAsync(
         Guid projectId,
         string name,
+        SavedTaskOrigin origin = SavedTaskOrigin.Local,
         CancellationToken cancellationToken = default)
     {
         name = Required(name, nameof(name));
+        if (origin is not (SavedTaskOrigin.Local or SavedTaskOrigin.Notification))
+        {
+            throw new ArgumentOutOfRangeException(nameof(origin));
+        }
+
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
 
@@ -1391,8 +1404,12 @@ public sealed class SqliteTrackerStore : ITrackerStore
         {
             command.Transaction = transaction;
             command.CommandText =
-                "SELECT Id, ProjectId, Name, IsArchived FROM SavedTasks WHERE ProjectId = $project AND Origin = 0 AND Name = $name COLLATE NOCASE LIMIT 1;";
-            AddParameters(command, ("$project", projectId.ToString("D")), ("$name", name));
+                "SELECT Id, ProjectId, Name, IsArchived, Origin FROM SavedTasks WHERE ProjectId = $project AND Origin IN (0, $notification) AND Name = $name COLLATE NOCASE LIMIT 1;";
+            AddParameters(
+                command,
+                ("$project", projectId.ToString("D")),
+                ("$notification", (int)SavedTaskOrigin.Notification),
+                ("$name", name));
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (await reader.ReadAsync(cancellationToken))
             {
@@ -1400,7 +1417,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
                     Guid.Parse(reader.GetString(0)),
                     Guid.Parse(reader.GetString(1)),
                     reader.GetString(2),
-                    reader.GetBoolean(3));
+                    reader.GetBoolean(3),
+                    (SavedTaskOrigin)reader.GetInt32(4));
             }
         }
 
@@ -1421,15 +1439,16 @@ public sealed class SqliteTrackerStore : ITrackerStore
             return existing;
         }
 
-        var task = new SavedTask(Guid.NewGuid(), projectId, name);
+        var task = new SavedTask(Guid.NewGuid(), projectId, name, Origin: origin);
         await ExecuteInTransactionAsync(
             connection,
             transaction,
-            "INSERT INTO SavedTasks (Id, ProjectId, Name, IsArchived, Origin) VALUES ($id, $project, $name, 0, 0);",
+            "INSERT INTO SavedTasks (Id, ProjectId, Name, IsArchived, Origin) VALUES ($id, $project, $name, 0, $origin);",
             cancellationToken,
             ("$id", task.Id.ToString("D")),
             ("$project", projectId.ToString("D")),
-            ("$name", task.Name));
+            ("$name", task.Name),
+            ("$origin", (int)origin));
         transaction.Commit();
         return task;
     }
@@ -2908,6 +2927,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$now", Format(nowUtc)),
             ("$source", (int)source));
 
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
+
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3009,6 +3030,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 ("$pending", pending ? 1 : 0),
                 ("$id", previousEntry.Id.ToString("D")),
                 ("$previousEnd", Format(previousEntry.EndUtc!.Value)));
+            await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
             transaction.Commit();
             await connection.CloseAsync();
             await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3047,6 +3069,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             description,
             projectId,
             cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
 
         transaction.Commit();
         await connection.CloseAsync();
@@ -3154,6 +3177,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$source", (int)running.Source),
             ("$paid", running.IsPaid ? 1 : 0));
 
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
+
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3260,6 +3285,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$pending", startedPending ? 1 : 0),
             ("$source", (int)source));
 
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
+
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3303,6 +3330,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             cancellationToken,
             ("$now", Format(nowUtc)), ("$pending", pending ? 1 : 0), ("$id", running.Id.ToString("D")));
         var deleted = await DeleteSubMinuteCompletedEntriesAsync(connection, transaction, running.Id, cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3448,6 +3476,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$unassigned", SystemEntityIds.UnassignedProjectId.ToString("D")),
             ("$now", Format(nowUtc)), ("$id", entryId.ToString("D")));
         await EnsureTagsForDescriptionAsync(connection, transaction, description, projectId, cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3487,6 +3516,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$now", Format(nowUtc)),
             ("$id", entryId.ToString("D")));
         await EnsureTagsForDescriptionAsync(connection, transaction, description, projectId, cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3587,6 +3617,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         {
             await EnsureTagsForDescriptionAsync(connection, transaction, description, projectId, cancellationToken);
         }
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
 
         transaction.Commit();
         await connection.CloseAsync();
@@ -3640,6 +3671,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             "DELETE FROM TimeEntries WHERE Id = $id AND EndUtc IS NOT NULL;",
             cancellationToken,
             ("$id", entryId.ToString("D")));
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -3724,6 +3756,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         }
 
         await DeleteSubMinuteCompletedEntriesAsync(connection, transaction, entryId, cancellationToken);
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
@@ -4537,7 +4570,28 @@ public sealed class SqliteTrackerStore : ITrackerStore
         command.Parameters.AddWithValue(
             "$entry",
             entryId is Guid id ? id.ToString("D") : DBNull.Value);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
+        var deleted = await command.ExecuteNonQueryAsync(cancellationToken);
+        return deleted;
+    }
+
+    private static async Task DeleteUnusedNotificationTasksAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            DELETE FROM SavedTasks
+            WHERE Origin = $notification
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM TimeEntries
+                  WHERE TimeEntries.TaskId = SavedTasks.Id
+              );
+            """;
+        command.Parameters.AddWithValue("$notification", (int)SavedTaskOrigin.Notification);
+        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static bool CanResumePreviousEntry(
@@ -5149,7 +5203,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ProjectId TEXT NOT NULL REFERENCES Projects(Id),
             Name TEXT NOT NULL COLLATE NOCASE,
             IsArchived INTEGER NOT NULL DEFAULT 0 CHECK (IsArchived IN (0, 1)),
-            Origin INTEGER NOT NULL DEFAULT 0 CHECK (Origin IN (0, 1, 2))
+            Origin INTEGER NOT NULL DEFAULT 0 CHECK (Origin IN (0, 1, 2, 3))
         );
 
         CREATE TABLE IF NOT EXISTS TrelloConnections (
@@ -5491,6 +5545,26 @@ public sealed class SqliteTrackerStore : ITrackerStore
     private const string MigrationV23Sql = """
         ALTER TABLE CustomTargets
         ADD COLUMN DurationMetric INTEGER NOT NULL DEFAULT 0 CHECK (DurationMetric IN (0, 1));
+        """;
+
+    private const string MigrationV24Sql = """
+        PRAGMA foreign_keys = OFF;
+
+        CREATE TABLE SavedTasksV24 (
+            Id TEXT PRIMARY KEY,
+            ProjectId TEXT NOT NULL REFERENCES Projects(Id),
+            Name TEXT NOT NULL COLLATE NOCASE,
+            IsArchived INTEGER NOT NULL DEFAULT 0 CHECK (IsArchived IN (0, 1)),
+            Origin INTEGER NOT NULL DEFAULT 0 CHECK (Origin IN (0, 1, 2, 3))
+        );
+
+        INSERT INTO SavedTasksV24 (Id, ProjectId, Name, IsArchived, Origin)
+        SELECT Id, ProjectId, Name, IsArchived, Origin FROM SavedTasks;
+
+        DROP TABLE SavedTasks;
+        ALTER TABLE SavedTasksV24 RENAME TO SavedTasks;
+
+        PRAGMA foreign_keys = ON;
         """;
 
     private const string SchemaV21IndexesSql = """

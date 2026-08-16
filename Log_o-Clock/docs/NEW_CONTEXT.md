@@ -7,7 +7,7 @@
 - Current source version: **1.142.2**.
 - Platform: Windows x64, WPF, .NET 10 (`net10.0-windows10.0.19041.0`).
 - SDK pinned by `global.json`: **10.0.301**, rolling to the latest compatible feature band.
-- Persistence: per-profile SQLite, current schema **23**.
+- Persistence: per-profile SQLite, current schema **24**.
 - Installer: self-contained single-file app plus a WiX 5 per-machine **MSI**. It is not MSIX.
 - Product name changed after the original implementation. Namespaces, project folders, the single-instance mutex, registry compatibility paths, and the `PROJECT_TIME_TRACKER_*` smoke variables intentionally retain the old `ProjectTimeTracker` name.
 
@@ -47,7 +47,7 @@ Three files are high-risk concentration points:
 - `SqliteTrackerStore.cs` — roughly 5,500 lines; schema, migrations, queries, transactions, target debt, integration reconciliation, and derived-file refresh.
 - `App.xaml.cs` — roughly 4,900 lines; composition root, tray and popup ownership, profiles, shutdown, and the WPF smoke harness.
 
-`AppController.cs` is the runtime state machine for timer, recognition, software observation, idle reviews, session transitions, checkpoints, and target-review notifications.
+`AppController.cs` is the runtime state machine for timer, recognition, software observation, idle reviews, session transitions, checkpoints, target-review notifications, and repeating net-work break reminders.
 
 Make narrow edits in these files. Preserve named XAML controls and handler signatures unless the change explicitly includes their consumers and smoke checks.
 

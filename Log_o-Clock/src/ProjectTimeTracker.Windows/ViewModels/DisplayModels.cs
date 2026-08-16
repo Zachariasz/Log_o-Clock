@@ -16,8 +16,11 @@ public sealed record TimeEntryRow(
     public IReadOnlyList<string> TagList => TagParser.Extract(Entry.Description);
     public string TagsSource => TagList.Count == 0 ? string.Empty : string.Join(' ', TagList.Select(tag => $"#{tag}"));
     public string Tags => TagList.Count == 0 ? "—" : string.Join(' ', TagList.Select(tag => $"#{tag}"));
-    public string Software => string.IsNullOrWhiteSpace(Entry.SoftwareLabels) ? "—" : Entry.SoftwareLabels;
+    public string Software => string.IsNullOrWhiteSpace(Entry.SoftwareLabels) ? "-" : Entry.SoftwareLabels;
     public string Day => AppTextCulture.FormatLongDate(Entry.StartUtc.ToLocalTime().Date);
+    public DateTimeOffset StartUtc => Entry.StartUtc;
+    public DateTimeOffset? EndUtc => Entry.EndUtc;
+    public long NetDurationSeconds => Entry.NetDurationSeconds(NowUtc);
     public string Start => AppTextCulture.FormatShortTime(Entry.StartUtc.ToLocalTime());
     public string End => Entry.EndUtc is { } endUtc
         ? AppTextCulture.FormatShortTime(endUtc.ToLocalTime())

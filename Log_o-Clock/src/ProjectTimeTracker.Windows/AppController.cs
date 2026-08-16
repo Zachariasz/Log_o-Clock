@@ -36,6 +36,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly SemaphoreSlim _accumulatedAwayReviewGate = new(1, 1);
     private readonly SemaphoreSlim _idleReviewGate = new(1, 1);
     private readonly SemaphoreSlim _targetReviewGate = new(1, 1);
+    private readonly SemaphoreSlim _breakReminderGate = new(1, 1);
     private IReadOnlyList<RecognitionCandidate> _recognitionCandidates = [];
     private IReadOnlyDictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition> _projectSoftware =
         new Dictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition>();
@@ -58,6 +59,10 @@ public sealed class AppController : IAsyncDisposable
     private bool _systemAvailable = true;
     private bool _signOutPrepared;
     private bool _disposed;
+    private long _breakReminderCompletedSeconds;
+    private long _breakReminderEntryBaselineSeconds;
+    private long _breakReminderLastShownInterval;
+    private Guid? _breakReminderEntryId;
 
     public AppController(
         ITrackerStore store,
@@ -121,6 +126,10 @@ public sealed class AppController : IAsyncDisposable
         ShortIdleReportingSettings.DefaultMaximumMinutes;
     public TargetReviewSchedule TargetReviewSchedule { get; private set; } =
         TargetReviewSchedule.Default;
+    public int BreakReminderIntervalMinutes { get; private set; } =
+        BreakReminderSettings.DefaultIntervalMinutes;
+    public BreakReminderPlacement BreakReminderPlacement { get; private set; } =
+        BreakReminderSettings.DefaultPlacement;
     public DateTimeOffset UtcNow => _clock.UtcNow;
     public TimeSpan RunningElapsed
     {
@@ -179,6 +188,11 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(TargetReviewSettings.EnabledKey, cancellationToken),
             await _store.GetSettingAsync(TargetReviewSettings.DayOfWeekKey, cancellationToken),
             await _store.GetSettingAsync(TargetReviewSettings.MonthWeekKey, cancellationToken));
+        BreakReminderIntervalMinutes = BreakReminderSettings.ParseIntervalMinutes(
+            await _store.GetSettingAsync(BreakReminderSettings.IntervalMinutesKey, cancellationToken));
+        BreakReminderPlacement = BreakReminderSettings.ParsePlacement(
+            await _store.GetSettingAsync(BreakReminderSettings.PlacementKey, cancellationToken));
+        ResetBreakReminderStreak();
         var sessionBehaviorValue = await _store.GetSettingAsync(
             SessionTrackingSettings.BehaviorKey,
             cancellationToken);
@@ -407,6 +421,41 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
+    public async Task SetBreakReminderIntervalMinutesAsync(
+        int minutes,
+        CancellationToken cancellationToken = default)
+    {
+        if (!BreakReminderSettings.IsValidIntervalMinutes(minutes))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minutes),
+                $"Break reminder time must be between {BreakReminderSettings.MinimumAllowedMinutes} and {BreakReminderSettings.MaximumAllowedMinutes} minutes.");
+        }
+
+        BreakReminderIntervalMinutes = minutes;
+        _breakReminderLastShownInterval = 0;
+        await _store.SetSettingAsync(
+            BreakReminderSettings.IntervalMinutesKey,
+            minutes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            cancellationToken);
+    }
+
+    public async Task SetBreakReminderPlacementAsync(
+        BreakReminderPlacement placement,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Enum.IsDefined(placement))
+        {
+            throw new ArgumentOutOfRangeException(nameof(placement));
+        }
+
+        BreakReminderPlacement = placement;
+        await _store.SetSettingAsync(
+            BreakReminderSettings.PlacementKey,
+            placement.ToString(),
+            cancellationToken);
+    }
+
     public async Task ShowPendingSessionNotificationAsync(
         CancellationToken cancellationToken = default)
     {
@@ -460,6 +509,8 @@ public sealed class AppController : IAsyncDisposable
             }
         }
 
+        ResetBreakReminderStreak();
+
         initialDescription = string.IsNullOrWhiteSpace(initialDescription)
             ? null
             : initialDescription.Trim();
@@ -476,6 +527,7 @@ public sealed class AppController : IAsyncDisposable
         RunningExcludedSeconds = startResult.ResumedPreviousEntry
             ? await _store.GetEntryExcludedSecondsAsync(RunningEntry.Id, cancellationToken)
             : 0;
+        BeginBreakReminderEntry();
         await RecordInitialSoftwareAsync(RunningEntry.Id, source, cancellationToken);
 
         RunningEntryChanged?.Invoke(this, RunningEntry);
@@ -515,6 +567,7 @@ public sealed class AppController : IAsyncDisposable
 
         await ReviewExcludedSoftwareVisitsAsync(_clock.UtcNow);
         await ReviewIdleCandidateAsync(_clock.UtcNow);
+        CompleteBreakReminderEntry();
         var switchUtc = _clock.UtcNow;
         RunningEntry = await _store.SwitchRunningTimerAsync(
             RunningEntry.Id,
@@ -526,6 +579,7 @@ public sealed class AppController : IAsyncDisposable
             cancellationToken);
         ResetExcludedSoftwareTracking();
         RunningExcludedSeconds = 0;
+        BeginBreakReminderEntry();
         await RecordInitialSoftwareAsync(
             RunningEntry.Id,
             TrackingSource.Manual,
@@ -684,6 +738,7 @@ public sealed class AppController : IAsyncDisposable
             description,
             _clock.UtcNow,
             cancellationToken);
+        CompleteBreakReminderEntry();
         RunningEntry = await _store.SplitRunningTimerAsync(
             entryId,
             taskId,
@@ -692,6 +747,7 @@ public sealed class AppController : IAsyncDisposable
             cancellationToken);
         ResetExcludedSoftwareTracking();
         RunningExcludedSeconds = 0;
+        BeginBreakReminderEntry();
         await RecordInitialSoftwareAsync(RunningEntry.Id, TrackingSource.Manual, cancellationToken);
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
@@ -704,6 +760,7 @@ public sealed class AppController : IAsyncDisposable
         await ReviewIdleCandidateAsync(_clock.UtcNow);
         var stopped = await _store.StopRunningTimerAsync(_clock.UtcNow, cancellationToken);
         ResetExcludedSoftwareTracking();
+        ResetBreakReminderStreak();
         RunningEntry = null;
         RunningExcludedSeconds = 0;
         RunningEntryChanged?.Invoke(this, null);
@@ -736,6 +793,7 @@ public sealed class AppController : IAsyncDisposable
         await _store.StopRunningTimerAsync(_clock.UtcNow, cancellationToken);
         _idleCandidate = null;
         ResetExcludedSoftwareTracking();
+        ResetBreakReminderStreak();
         RunningEntry = null;
         RunningExcludedSeconds = 0;
     }
@@ -1618,6 +1676,7 @@ public sealed class AppController : IAsyncDisposable
             taskId = (await _store.GetOrAddTaskAsync(
                 projectId,
                 taskName,
+                SavedTaskOrigin.Notification,
                 CancellationToken.None)).Id;
         }
 
@@ -1628,6 +1687,7 @@ public sealed class AppController : IAsyncDisposable
         {
             await ReviewExcludedSoftwareVisitsAsync(_clock.UtcNow);
             await ReviewIdleCandidateAsync(_clock.UtcNow);
+            CompleteBreakReminderEntry();
             var switchUtc = _clock.UtcNow;
             RunningEntry = await _store.SwitchRunningTimerAsync(
                 runningEntry.Id,
@@ -1639,6 +1699,7 @@ public sealed class AppController : IAsyncDisposable
                 CancellationToken.None);
             ResetExcludedSoftwareTracking();
             RunningExcludedSeconds = 0;
+            BeginBreakReminderEntry();
             await RecordInitialSoftwareAsync(
                 RunningEntry.Id,
                 TrackingSource.WindowReminder,
@@ -2063,6 +2124,9 @@ public sealed class AppController : IAsyncDisposable
             _accumulatedAwayReview?.PendingIntervals ?? [],
             _clock.UtcNow);
 
+    internal long BreakReminderStreakSecondsForPreview =>
+        RunningEntry is null ? 0 : CurrentBreakReminderStreakSeconds();
+
     internal int AccumulatedAwayNextPromptMultiplierForPreview =>
         _accumulatedAwayReview?.NextPromptMultiplier ?? 1;
 
@@ -2187,7 +2251,8 @@ public sealed class AppController : IAsyncDisposable
             entry.Description,
             canRip,
             AllowProjectSelection: isUnassigned,
-            Heading: heading));
+            Heading: heading,
+            Source: entry.Source));
     }
 
     private async void OnCheckpointTick(object? sender, EventArgs e)
@@ -2340,11 +2405,85 @@ public sealed class AppController : IAsyncDisposable
             target.DurationMetric == TargetDurationMetric.IncludingShortIdle);
     }
 
+    private async Task TryShowBreakReminderAsync()
+    {
+        if (_disposed || RunningEntry is null || !await _breakReminderGate.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            EnsureBreakReminderEntry();
+            var intervalSeconds = (long)BreakReminderIntervalMinutes * 60;
+            var completedIntervals = CurrentBreakReminderStreakSeconds() / intervalSeconds;
+            if (completedIntervals == 0 || completedIntervals <= _breakReminderLastShownInterval)
+            {
+                return;
+            }
+
+            _breakReminderLastShownInterval = completedIntervals;
+            await _notificationService.ShowBreakReminderAsync(BreakReminderPlacement);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+        }
+        finally
+        {
+            _breakReminderGate.Release();
+        }
+    }
+
+    private void ResetBreakReminderStreak()
+    {
+        _breakReminderCompletedSeconds = 0;
+        _breakReminderLastShownInterval = 0;
+        _breakReminderEntryId = null;
+        _breakReminderEntryBaselineSeconds = 0;
+        BeginBreakReminderEntry();
+    }
+
+    private void BeginBreakReminderEntry()
+    {
+        _breakReminderEntryId = RunningEntry?.Id;
+        _breakReminderEntryBaselineSeconds = CurrentRunningElapsedSeconds();
+    }
+
+    private void CompleteBreakReminderEntry()
+    {
+        if (RunningEntry is null || _breakReminderEntryId != RunningEntry.Id)
+        {
+            return;
+        }
+
+        _breakReminderCompletedSeconds += Math.Max(
+            0,
+            CurrentRunningElapsedSeconds() - _breakReminderEntryBaselineSeconds);
+    }
+
+    private void EnsureBreakReminderEntry()
+    {
+        if (_breakReminderEntryId != RunningEntry?.Id)
+        {
+            BeginBreakReminderEntry();
+        }
+    }
+
+    private long CurrentBreakReminderStreakSeconds() =>
+        _breakReminderCompletedSeconds + Math.Max(
+            0,
+            CurrentRunningElapsedSeconds() - _breakReminderEntryBaselineSeconds);
+
+    private long CurrentRunningElapsedSeconds() =>
+        Math.Max(0, (long)Math.Floor(RunningElapsed.TotalSeconds));
+
     private void OnSecondTick(object? sender, EventArgs e)
     {
         _ = sender;
         _ = e;
         TimerTick?.Invoke(this, EventArgs.Empty);
+        _ = TryShowBreakReminderAsync();
     }
 
     private static string FormatDuration(TimeSpan duration)
@@ -2413,4 +2552,5 @@ public sealed record EntryDetailsRequest(
     string? Description,
     bool CanRip = false,
     bool AllowProjectSelection = false,
-    string? Heading = null);
+    string? Heading = null,
+    TrackingSource Source = TrackingSource.Manual);

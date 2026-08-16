@@ -534,6 +534,12 @@
                                     Content="Save Current View"
                                     Visibility="Collapsed"
                                     Click="HistorySaveView_Click" />
+                            <Button x:Name="HistoryClearSortingButton"
+                                    Content="Clear sorting"
+                                    Visibility="Collapsed"
+                                    Margin="8,0,0,0"
+                                    Click="HistoryClearSorting_Click"
+                                    ToolTip="Clear column sorting and restore day groups" />
                             <Button x:Name="HistoryColumnsButton"
                                     Style="{StaticResource IconButton}"
                                     Margin="8,0,0,0"
@@ -723,9 +729,9 @@
                             </GroupStyle>
                         </DataGrid.GroupStyle>
                         <DataGrid.Columns>
-                            <DataGridTextColumn x:Name="HistoryClientColumn" Header="Client" Binding="{Binding Client, Converter={StaticResource WrapOpportunityConverter}}" Width="95" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTextColumn x:Name="HistoryProjectColumn" Header="Project" Binding="{Binding Project, Converter={StaticResource WrapOpportunityConverter}}" Width="115" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTemplateColumn x:Name="HistoryTaskColumn" Header="Task" Width="100">
+                            <DataGridTextColumn x:Name="HistoryClientColumn" Header="Client" SortMemberPath="Client" Binding="{Binding Client, Converter={StaticResource WrapOpportunityConverter}}" Width="95" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryProjectColumn" Header="Project" SortMemberPath="Project" Binding="{Binding Project, Converter={StaticResource WrapOpportunityConverter}}" Width="115" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTemplateColumn x:Name="HistoryTaskColumn" Header="Task" SortMemberPath="Task" Width="100">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Task, Converter={StaticResource WrapOpportunityConverter}}"
@@ -735,7 +741,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn x:Name="HistoryDescriptionColumn" Header="Description" Width="150">
+                            <DataGridTemplateColumn x:Name="HistoryDescriptionColumn" Header="Description" SortMemberPath="Description" Width="150">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <controls:TagDescriptionDisplay SourceText="{Binding DescriptionSource}"
@@ -745,7 +751,7 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTemplateColumn x:Name="HistoryTagsColumn" Header="Tags" Width="105">
+                            <DataGridTemplateColumn x:Name="HistoryTagsColumn" Header="Tags" SortMemberPath="Tags" Width="105">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <controls:TagDescriptionDisplay SourceText="{Binding TagsSource}"
@@ -755,10 +761,10 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn x:Name="HistorySoftwareColumn" Header="Software" Binding="{Binding Software, Converter={StaticResource WrapOpportunityConverter}}" Width="120" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTextColumn x:Name="HistoryStartColumn" Header="Start" Binding="{Binding Start}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTextColumn x:Name="HistoryEndColumn" Header="End" Binding="{Binding End}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTemplateColumn x:Name="HistoryDurationColumn" Header="Duration" Width="96">
+                            <DataGridTextColumn x:Name="HistorySoftwareColumn" Header="Software" SortMemberPath="Software" Binding="{Binding Software, Converter={StaticResource WrapOpportunityConverter}}" Width="120" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryStartColumn" Header="Start" SortMemberPath="StartUtc" Binding="{Binding Start}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryEndColumn" Header="End" SortMemberPath="EndUtc" Binding="{Binding End}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTemplateColumn x:Name="HistoryDurationColumn" Header="Duration" SortMemberPath="NetDurationSeconds" Width="96">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate>
                                         <StackPanel VerticalAlignment="Center">
@@ -808,8 +814,8 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn x:Name="HistoryPaymentColumn" Header="Payment" Binding="{Binding Payment}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
-                            <DataGridTextColumn x:Name="HistoryStatusColumn" Header="Status" Binding="{Binding Status}" Width="90" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryPaymentColumn" Header="Payment" SortMemberPath="Payment" Binding="{Binding Payment}" Width="72" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
+                            <DataGridTextColumn x:Name="HistoryStatusColumn" Header="Status" SortMemberPath="Status" Binding="{Binding Status}" Width="90" ElementStyle="{StaticResource HistoryWrapAwareCellTextStyle}" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
@@ -1810,6 +1816,34 @@
                     <TextBlock x:Name="RecentEntryResumeValidationText"
                                TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
                                Margin="3,5,0,0" Visibility="Collapsed" />
+                    <TextBlock Text="Break reminders" FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Show a break reminder every" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                        <TextBox x:Name="BreakReminderMinutesText"
+                                 Width="88" Margin="10,0,0,0"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="BreakReminderMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="BreakReminderMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 1 to 1440"
+                                 AutomationProperties.Name="Break reminder interval in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="Counts net tracked time while the timer runs, including project switches and rips. The reminder closes automatically after 3 seconds."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="BreakReminderValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
+                    <TextBlock Text="Position" FontWeight="SemiBold" Margin="0,12,0,6" />
+                    <WrapPanel>
+                        <RadioButton x:Name="BreakReminderBottomRight" Content="Bottom right" Tag="BottomRight"
+                                     GroupName="BreakReminderPlacement" Style="{StaticResource TargetReviewChoiceStyle}"
+                                     Checked="BreakReminderPlacement_Changed" />
+                        <RadioButton x:Name="BreakReminderScreenCenter" Content="Centre of screen" Tag="ScreenCenter"
+                                     GroupName="BreakReminderPlacement" Style="{StaticResource TargetReviewChoiceStyle}"
+                                     Checked="BreakReminderPlacement_Changed" />
+                    </WrapPanel>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>

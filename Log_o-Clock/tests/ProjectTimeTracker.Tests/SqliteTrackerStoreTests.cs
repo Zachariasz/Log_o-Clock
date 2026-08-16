@@ -208,6 +208,51 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task NotificationTasksWithoutEntriesAreRemovedWhileLocalTasksAreRetained()
+    {
+        var client = await _store.AddClientAsync("Notification client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Notification project", "#445566");
+        var retainedLocalTask = await _store.AddTaskAsync(project.Id, "Created in Tasks tab");
+        var notificationTask = await _store.GetOrAddTaskAsync(
+            project.Id,
+            "Typed in notification",
+            SavedTaskOrigin.Notification);
+        var start = new DateTimeOffset(2026, 8, 16, 9, 0, 0, TimeSpan.Zero);
+        var started = await _store.StartOrResumeTimerAsync(
+            project.Id,
+            notificationTask.Id,
+            description: null,
+            source: TrackingSource.WindowReminder,
+            nowUtc: start,
+            maximumGap: TimeSpan.Zero);
+
+        await _store.UpdateEntryDetailsAsync(
+            started.Entry.Id,
+            retainedLocalTask.Id,
+            description: null,
+            start.AddMinutes(1));
+
+        var remainingAfterRename = await _store.GetTasksAsync(project.Id);
+        Assert.Equal(retainedLocalTask.Id, Assert.Single(remainingAfterRename).Id);
+
+        var discardedNotificationTask = await _store.GetOrAddTaskAsync(
+            project.Id,
+            "Stopped notification task",
+            SavedTaskOrigin.Notification);
+        var shortEntry = await _store.StartOrResumeTimerAsync(
+            project.Id,
+            discardedNotificationTask.Id,
+            description: null,
+            source: TrackingSource.WindowReminder,
+            nowUtc: start.AddHours(1),
+            maximumGap: TimeSpan.Zero);
+
+        Assert.Null(await _store.StopRunningTimerAsync(start.AddHours(1).AddSeconds(30)));
+        Assert.Equal(retainedLocalTask.Id, Assert.Single(await _store.GetTasksAsync(project.Id)).Id);
+        Assert.Null(await _store.GetTimeEntryAsync(shortEntry.Entry.Id));
+    }
+
+    [Fact]
     public async Task RenamingProjectAddsNewNameAsRecognitionAlias()
     {
         var client = await _store.AddClientAsync("Acme", "#112233");
@@ -3039,6 +3084,11 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         var taskAfterMigration = Assert.Single(await migrated.GetTasksAsync());
         Assert.Equal(taskId, taskAfterMigration.Id);
         Assert.Equal(SavedTaskOrigin.Local, taskAfterMigration.Origin);
+        var notificationTask = await migrated.GetOrAddTaskAsync(
+            taskAfterMigration.ProjectId,
+            "Notification task after upgrade",
+            SavedTaskOrigin.Notification);
+        Assert.Equal(SavedTaskOrigin.Notification, notificationTask.Origin);
         Assert.Equal("Preserved entry", Assert.Single(await migrated.GetEntriesAsync(
             start.AddMinutes(-1),
             start.AddHours(2))).Description);
@@ -3047,7 +3097,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await versionConnection.OpenAsync();
         await using var versionCommand = versionConnection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(23L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(24L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     private static TrelloCard CreateTrelloCard(

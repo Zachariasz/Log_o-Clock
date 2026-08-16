@@ -108,7 +108,7 @@ sequenceDiagram
     E->>G: queue sync after data change
 ```
 
-Timer checkpoints run every 30 seconds. Live elapsed time comes from `IClock` and subtracts persisted exclusions. A clean shutdown stops the timer. Recovery closes or reviews interrupted work according to the saved session behaviour.
+Timer checkpoints run every 30 seconds. Live elapsed time comes from `IClock` and subtracts persisted exclusions. The controller also evaluates the current net-work streak each second: it carries across timer switches/rips, resets when tracking stops, and emits a non-blocking break toast at every per-profile interval. A clean shutdown stops the timer. Recovery closes or reviews interrupted work according to the saved session behaviour.
 
 ## Foreground recognition flow
 
@@ -129,7 +129,7 @@ flowchart LR
 
 Recognition candidates come only from enabled rules attached to active clients/projects. Rule title comparison is case-insensitive; optional process comparison removes `.exe`. Longest title phrase wins. Task matching ignores delimiters and recognizes word/camel-case boundaries, but only fills one unambiguous best match.
 
-The reminder service owns one active recognition popup. `Gimme break!` snoozes recognition for five minutes. Ordinary startup deliberately does not treat the already-focused window as a new recognition visit.
+The reminder service owns one active recognition popup. `Gimme break!` snoozes recognition for five minutes. A task typed in a reminder or its automatic details popup is marked notification-created; the store removes it if no entry retains it. Ordinary startup deliberately does not treat the already-focused window as a new recognition visit.
 
 ## Idle, media protection, and Windows sessions
 
@@ -186,4 +186,3 @@ flowchart LR
 - Trello is an inbound task catalogue only.
 - Google Sheets is an outbound/merge export only.
 - Neither integration replaces SQLite as the running application's source of truth.
-

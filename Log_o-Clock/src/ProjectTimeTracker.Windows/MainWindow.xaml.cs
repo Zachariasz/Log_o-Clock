@@ -114,6 +114,8 @@ public partial class MainWindow : Window
     private Guid? _historyProjectFilterId;
     private Guid? _historyTaskFilterId;
     private bool _historyUnassignedOnly;
+    private string? _historySortMemberPath;
+    private ListSortDirection? _historySortDirection;
     private Guid? _ruleProjectFilterId;
     private Guid? _softwareProjectFilterId;
     private Guid? _taskProjectFilterId;
@@ -245,6 +247,7 @@ public partial class MainWindow : Window
         BuildHistoryColumnsMenu();
         BuildReportColumnsMenu();
         HistoryGrid.ColumnReordered += HistoryGrid_ColumnReordered;
+        HistoryGrid.Sorting += HistoryGrid_Sorting;
         HistoryGrid.PreviewMouseLeftButtonUp += HistoryGrid_PreviewMouseLeftButtonUp;
         HistoryGrid.SizeChanged += (_, _) => UpdateHistoryGroupLayout();
     }
@@ -391,6 +394,9 @@ public partial class MainWindow : Window
             Owner = this,
         };
     }
+
+    internal TargetSettingsWindow CreateTargetSettingsWindowForPreview() =>
+        new(_projectOptions) { Owner = this };
 
     internal void VerifyReportTaskDateSortingForPreview(
         Guid projectId,
@@ -658,6 +664,35 @@ public partial class MainWindow : Window
         UpdateIdleProtectionStatus(_controller.IdleProtectionState);
     }
 
+    internal async Task VerifyBreakReminderSettingsForPreviewAsync()
+    {
+        BreakReminderMinutesText.Text = "90";
+        await ApplyBreakReminderMinutesAsync();
+        if (_controller.BreakReminderIntervalMinutes != 90 ||
+            await _store.GetSettingAsync(BreakReminderSettings.IntervalMinutesKey) != "90" ||
+            BreakReminderValidationText.Visibility != Visibility.Collapsed)
+        {
+            throw new InvalidOperationException(
+                "The Settings break reminder interval did not apply and persist.");
+        }
+
+        BreakReminderScreenCenter.IsChecked = true;
+        await Task.Delay(100);
+        if (_controller.BreakReminderPlacement != BreakReminderPlacement.ScreenCenter ||
+            await _store.GetSettingAsync(BreakReminderSettings.PlacementKey) !=
+                BreakReminderPlacement.ScreenCenter.ToString())
+        {
+            throw new InvalidOperationException(
+                "The Settings break reminder position did not apply and persist.");
+        }
+
+        BreakReminderMinutesText.Text =
+            BreakReminderSettings.DefaultIntervalMinutes.ToString(CultureInfo.CurrentCulture);
+        await ApplyBreakReminderMinutesAsync();
+        BreakReminderBottomRight.IsChecked = true;
+        await Task.Delay(100);
+    }
+
     internal void VerifyTrelloUiForPreview()
     {
         var requiredControls = new FrameworkElement[]
@@ -765,6 +800,57 @@ public partial class MainWindow : Window
         }
     }
 
+    internal void VerifyHistoryGlobalProjectSortingForPreview(
+        IReadOnlyList<Guid> expectedProjectEntryIds,
+        IReadOnlyList<Guid> expectedClientEntryIds)
+    {
+        try
+        {
+            VerifyHistoryColumnSortingForPreview(
+                HistoryProjectColumn,
+                expectedProjectEntryIds,
+                "project");
+            VerifyHistoryColumnSortingForPreview(
+                HistoryClientColumn,
+                expectedClientEntryIds,
+                "client");
+
+            ClearHistorySort();
+            var restoredView = CollectionViewSource.GetDefaultView(HistoryGrid.ItemsSource);
+            if (HistoryClearSortingButton.Visibility != Visibility.Collapsed ||
+                restoredView.GroupDescriptions.Count != 1)
+            {
+                throw new InvalidOperationException(
+                    "Clearing History sorting did not restore the day-grouped view.");
+            }
+        }
+        finally
+        {
+            ClearHistorySort();
+        }
+    }
+
+    private void VerifyHistoryColumnSortingForPreview(
+        DataGridColumn column,
+        IReadOnlyList<Guid> expectedEntryIds,
+        string columnName)
+    {
+        var eventArgs = new DataGridSortingEventArgs(column);
+        HistoryGrid_Sorting(HistoryGrid, eventArgs);
+        var view = CollectionViewSource.GetDefaultView(HistoryGrid.ItemsSource);
+        var actualEntryIds = view
+            .Cast<TimeEntryRow>()
+            .Select(row => row.Entry.Id)
+            .ToArray();
+        if (!eventArgs.Handled ||
+            view.GroupDescriptions.Count != 0 ||
+            !actualEntryIds.SequenceEqual(expectedEntryIds))
+        {
+            throw new InvalidOperationException(
+                $"History {columnName} sorting did not order the complete visible result set.");
+        }
+    }
+
     internal void VerifyObjectInteractionContractForPreview()
     {
         var requiredControls = new FrameworkElement[]
@@ -774,7 +860,7 @@ public partial class MainWindow : Window
             MinimizeWindowButton, MaximizeWindowButton, CloseWindowButton,
             HistoryRangePicker, HistoryProjectCombo, HistoryTaskCombo, HistoryTagCombo,
             HistoryDescriptionFilterText, HistoryGrid,
-            HistorySaveViewButton, HistoryColumnsButton,
+            HistorySaveViewButton, HistoryClearSortingButton, HistoryColumnsButton,
             HistoryThisMonthButton, HistoryThisWeekButton, HistoryTodayButton,
             ClientsGrid, ProjectsGrid, TargetProjectCombo, CustomTargetsGrid, TaskProjectCombo, TasksGrid, TagsGrid, SoftwareProjectCombo, SoftwareGrid, RuleProjectCombo, RulesGrid,
             ReportRangePicker, ReportClientCombo, ReportProjectCombo, ReportTaskCombo,
@@ -786,6 +872,8 @@ public partial class MainWindow : Window
             SidebarTargetsPanel, SidebarTargetsResizeThumb, TargetsGrid, FloatingTargetsGrid,
             SettingsCategoryTabs, RecognitionCheck, SessionBehaviorCombo, SessionBehaviorDescriptionText,
             RecentEntryResumeMinutesText, RecentEntryResumeValidationText,
+            BreakReminderMinutesText, BreakReminderValidationText,
+            BreakReminderBottomRight, BreakReminderScreenCenter,
             CallsIdleProtectionCheck, VideoIdleProtectionCheck,
             IdleProtectionStatusText, IdleProtectionStatusDot, IdleProtectionPrivacyText,
             ExcludedSoftwareReviewMinutesText, ExcludedSoftwareReviewValidationText,
@@ -2897,6 +2985,9 @@ public partial class MainWindow : Window
         UpdateIdleProtectionStatus(_controller.IdleProtectionState);
         RecentEntryResumeMinutesText.Text =
             _controller.RecentEntryResumeMaximumGapMinutes.ToString(CultureInfo.CurrentCulture);
+        BreakReminderMinutesText.Text =
+            _controller.BreakReminderIntervalMinutes.ToString(CultureInfo.CurrentCulture);
+        SetBreakReminderPlacementControls(_controller.BreakReminderPlacement);
         ExcludedSoftwareReviewMinutesText.Text =
             _controller.ExcludedSoftwareReviewMinimumMinutes.ToString(CultureInfo.CurrentCulture);
         AccumulatedAwayReviewMinutesText.Text =
@@ -4006,6 +4097,11 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (MainTabs.SelectedIndex != 0 && _historySortMemberPath is not null)
+        {
+            ClearHistorySort();
+        }
+
         if (MainTabs.SelectedIndex == 0)
         {
             if (_preserveHistoryFiltersOnNextTabEntry)
@@ -4842,9 +4938,128 @@ public partial class MainWindow : Window
                 row.DescriptionSource.Contains(descriptionQuery, StringComparison.OrdinalIgnoreCase));
         }
 
-        var view = new ListCollectionView(filtered.ToList());
-        view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(TimeEntryRow.Day)));
+        var view = new ListCollectionView(SortHistoryRows(filtered).ToList());
+        if (_historySortMemberPath is null || _historySortDirection is null)
+        {
+            view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(TimeEntryRow.Day)));
+        }
+
         HistoryGrid.ItemsSource = view;
+    }
+
+    private void HistoryGrid_Sorting(object? sender, DataGridSortingEventArgs e)
+    {
+        _ = sender;
+        var memberPath = GetHistorySortMemberPath(e.Column);
+        if (memberPath is null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var direction = string.Equals(
+                _historySortMemberPath,
+                memberPath,
+                StringComparison.Ordinal) &&
+                _historySortDirection == ListSortDirection.Ascending
+            ? ListSortDirection.Descending
+            : ListSortDirection.Ascending;
+        SetHistorySort(memberPath, direction);
+    }
+
+    private string? GetHistorySortMemberPath(DataGridColumn column)
+    {
+        if (ReferenceEquals(column, HistoryClientColumn)) return nameof(TimeEntryRow.Client);
+        if (ReferenceEquals(column, HistoryProjectColumn)) return nameof(TimeEntryRow.Project);
+        if (ReferenceEquals(column, HistoryTaskColumn)) return nameof(TimeEntryRow.Task);
+        if (ReferenceEquals(column, HistoryDescriptionColumn)) return nameof(TimeEntryRow.Description);
+        if (ReferenceEquals(column, HistoryTagsColumn)) return nameof(TimeEntryRow.Tags);
+        if (ReferenceEquals(column, HistorySoftwareColumn)) return nameof(TimeEntryRow.Software);
+        if (ReferenceEquals(column, HistoryStartColumn)) return nameof(TimeEntryRow.StartUtc);
+        if (ReferenceEquals(column, HistoryEndColumn)) return nameof(TimeEntryRow.EndUtc);
+        if (ReferenceEquals(column, HistoryDurationColumn)) return nameof(TimeEntryRow.NetDurationSeconds);
+        if (ReferenceEquals(column, HistoryPaymentColumn)) return nameof(TimeEntryRow.Payment);
+        return ReferenceEquals(column, HistoryStatusColumn) ? nameof(TimeEntryRow.Status) : null;
+    }
+
+    private IEnumerable<TimeEntryRow> SortHistoryRows(IEnumerable<TimeEntryRow> rows)
+    {
+        if (_historySortMemberPath is null || _historySortDirection is null)
+        {
+            return rows;
+        }
+
+        return _historySortMemberPath switch
+        {
+            nameof(TimeEntryRow.Client) => OrderHistoryRows(rows, row => row.Client),
+            nameof(TimeEntryRow.Project) => OrderHistoryRows(rows, row => row.Project),
+            nameof(TimeEntryRow.Task) => OrderHistoryRows(rows, row => row.Task),
+            nameof(TimeEntryRow.Description) => OrderHistoryRows(rows, row => row.Description),
+            nameof(TimeEntryRow.Tags) => OrderHistoryRows(rows, row => row.Tags),
+            nameof(TimeEntryRow.Software) => OrderHistoryRows(rows, row => row.Software),
+            nameof(TimeEntryRow.StartUtc) => OrderHistoryRows(rows, row => row.StartUtc),
+            nameof(TimeEntryRow.EndUtc) => OrderHistoryRows(rows, row => row.EndUtc),
+            nameof(TimeEntryRow.NetDurationSeconds) => OrderHistoryRows(rows, row => row.NetDurationSeconds),
+            nameof(TimeEntryRow.Payment) => OrderHistoryRows(rows, row => row.Payment),
+            nameof(TimeEntryRow.Status) => OrderHistoryRows(rows, row => row.Status),
+            _ => rows,
+        };
+    }
+
+    private IOrderedEnumerable<TimeEntryRow> OrderHistoryRows<T>(
+        IEnumerable<TimeEntryRow> rows,
+        Func<TimeEntryRow, T> selector)
+    {
+        var comparer = typeof(T) == typeof(string)
+            ? (IComparer<T>)(object)StringComparer.OrdinalIgnoreCase
+            : Comparer<T>.Default;
+        var ordered = _historySortDirection == ListSortDirection.Ascending
+            ? rows.OrderBy(selector, comparer)
+            : rows.OrderByDescending(selector, comparer);
+        return ordered.ThenByDescending(row => row.StartUtc);
+    }
+
+    private void SetHistorySort(string memberPath, ListSortDirection direction)
+    {
+        _historySortMemberPath = memberPath;
+        _historySortDirection = direction;
+        foreach (var column in HistoryGrid.Columns)
+        {
+            column.SortDirection = string.Equals(
+                GetHistorySortMemberPath(column),
+                memberPath,
+                StringComparison.Ordinal)
+                ? direction
+                : null;
+        }
+
+        UpdateHistorySortControls();
+        ApplyHistoryFilter();
+    }
+
+    private void ClearHistorySort()
+    {
+        _historySortMemberPath = null;
+        _historySortDirection = null;
+        foreach (var column in HistoryGrid.Columns)
+        {
+            column.SortDirection = null;
+        }
+
+        UpdateHistorySortControls();
+        ApplyHistoryFilter();
+    }
+
+    private void UpdateHistorySortControls() =>
+        HistoryClearSortingButton.Visibility = _historySortMemberPath is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+    private void HistoryClearSorting_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        ClearHistorySort();
     }
 
     private void HistoryTagChanged(object sender, SelectionChangedEventArgs e)
@@ -8236,6 +8451,109 @@ public partial class MainWindow : Window
             RecentEntryResumeMinutesText.Text =
                 _controller.RecentEntryResumeMaximumGapMinutes.ToString(CultureInfo.CurrentCulture);
         }
+    }
+
+    private async void BreakReminderMinutesText_LostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await ApplyBreakReminderMinutesAsync();
+    }
+
+    private async void BreakReminderMinutesText_PreviewKeyDown(
+        object sender,
+        KeyEventArgs e)
+    {
+        _ = sender;
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await ApplyBreakReminderMinutesAsync();
+    }
+
+    private async Task ApplyBreakReminderMinutesAsync()
+    {
+        if (!_loaded || _loading)
+        {
+            return;
+        }
+
+        var value = BreakReminderMinutesText.Text.Trim();
+        if (!int.TryParse(
+                value,
+                NumberStyles.None,
+                CultureInfo.CurrentCulture,
+                out var minutes) ||
+            !BreakReminderSettings.IsValidIntervalMinutes(minutes))
+        {
+            BreakReminderValidationText.Text =
+                $"Enter a whole number from {BreakReminderSettings.MinimumAllowedMinutes} to {BreakReminderSettings.MaximumAllowedMinutes} minutes.";
+            BreakReminderValidationText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        try
+        {
+            if (minutes != _controller.BreakReminderIntervalMinutes)
+            {
+                await _controller.SetBreakReminderIntervalMinutesAsync(minutes);
+            }
+
+            BreakReminderMinutesText.Text =
+                _controller.BreakReminderIntervalMinutes.ToString(CultureInfo.CurrentCulture);
+            BreakReminderValidationText.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not update break reminder time", exception);
+            BreakReminderMinutesText.Text =
+                _controller.BreakReminderIntervalMinutes.ToString(CultureInfo.CurrentCulture);
+        }
+    }
+
+    private async void BreakReminderPlacement_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || !TryGetBreakReminderPlacement(out var placement))
+        {
+            return;
+        }
+
+        try
+        {
+            if (placement != _controller.BreakReminderPlacement)
+            {
+                await _controller.SetBreakReminderPlacementAsync(placement);
+            }
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not update break reminder position", exception);
+            SetBreakReminderPlacementControls(_controller.BreakReminderPlacement);
+        }
+    }
+
+    private void SetBreakReminderPlacementControls(BreakReminderPlacement placement)
+    {
+        BreakReminderBottomRight.IsChecked = placement == BreakReminderPlacement.BottomRight;
+        BreakReminderScreenCenter.IsChecked = placement == BreakReminderPlacement.ScreenCenter;
+    }
+
+    private bool TryGetBreakReminderPlacement(out BreakReminderPlacement placement)
+    {
+        var value = BreakReminderBottomRight.IsChecked == true
+            ? BreakReminderBottomRight.Tag as string
+            : BreakReminderScreenCenter.IsChecked == true
+                ? BreakReminderScreenCenter.Tag as string
+                : null;
+        return Enum.TryParse(value, ignoreCase: true, out placement) &&
+               Enum.IsDefined(placement);
     }
 
     private async void ExcludedSoftwareReviewMinutesText_PreviewKeyDown(

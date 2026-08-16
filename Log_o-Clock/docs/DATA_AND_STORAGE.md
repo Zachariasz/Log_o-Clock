@@ -50,9 +50,9 @@ If the root is not overridden, startup can copy the legacy `%LocalAppData%\Proje
 - Connection mode: read/write/create, shared cache, foreign keys enabled.
 - Runtime pragmas: foreign keys on, WAL journal mode, 5-second busy timeout.
 - Timestamps: UTC ISO round-trip text.
-- Current `PRAGMA user_version`: **23**.
+- Current `PRAGMA user_version`: **24**.
 - Upgrade: before an existing older database is changed, a sibling `TimeTracker.db.backup-v<old>-<timestamp>` is created.
-- Initialization also ensures system entities, removes invalid sub-minute completed entries, synchronizes tag definitions from descriptions, and refreshes derived files.
+- Initialization also ensures system entities, removes invalid sub-minute completed entries and unused notification-created tasks, synchronizes tag definitions from descriptions, and refreshes derived files.
 
 ## Simplified relational map
 
@@ -85,7 +85,7 @@ Additional singleton/operational tables are `TrelloConnections`, `Settings`, and
 
 - Client names are case-insensitively unique.
 - Project names are unique within a client.
-- Local task names are case-insensitively unique within a project. Trello tasks may duplicate names because external card identity is the key.
+- Local task names are case-insensitively unique within a project. Trello tasks may duplicate names because external card identity is the key. Notification-created tasks are tracked separately so an unused one can be removed without affecting intentional local tasks.
 - Tag names are case-insensitively unique.
 - Software process names are case-insensitively unique.
 - One partial unique index permits only one `TimeEntries.EndUtc IS NULL` row.
@@ -158,6 +158,7 @@ Trello descriptions, labels, comments, due dates, attachments, and other members
 - Removing a client does the same for all its projects, then removes the client.
 - Removing a standalone target is a physical delete.
 - Removing a saved task generally archives it so historical references retain identity. Trello reconciliation has special delete/detach/suppress rules.
+- A task typed from a recognition notification or its automatic details popup is marked as notification-created. It is physically deleted when no `TimeEntries` row references it, including after later correction, entry deletion, or sub-minute entry cleanup. A task explicitly created in the Tasks tab remains even when it has no entries.
 - Removing software hides/removes it from management, deletes historical entry-software associations, and clears correlated settings/tags.
 - Removing a tag converts managed description markers to plain text semantics and removes the shared definition/scope.
 

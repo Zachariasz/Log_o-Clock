@@ -85,6 +85,7 @@ public enum SavedTaskOrigin
     Local,
     Trello,
     TrelloDetached,
+    Notification,
 }
 
 public sealed record SavedTask(
@@ -594,6 +595,41 @@ public static class RecentEntryResumeSettings
             : DefaultMaximumGapMinutes;
 
     public static bool IsValidMaximumGapMinutes(int minutes) =>
+        minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
+}
+
+public enum BreakReminderPlacement
+{
+    BottomRight,
+    ScreenCenter,
+}
+
+public static class BreakReminderSettings
+{
+    public const string IntervalMinutesKey = "break-reminder.interval-minutes";
+    public const string PlacementKey = "break-reminder.placement";
+    public const int DefaultIntervalMinutes = 120;
+    public const int MinimumAllowedMinutes = 1;
+    public const int MaximumAllowedMinutes = 1_440;
+    public const BreakReminderPlacement DefaultPlacement = BreakReminderPlacement.BottomRight;
+
+    public static int ParseIntervalMinutes(string? value) =>
+        int.TryParse(
+            value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var minutes) &&
+        IsValidIntervalMinutes(minutes)
+            ? minutes
+            : DefaultIntervalMinutes;
+
+    public static BreakReminderPlacement ParsePlacement(string? value) =>
+        Enum.TryParse<BreakReminderPlacement>(value, ignoreCase: true, out var placement) &&
+        Enum.IsDefined(placement)
+            ? placement
+            : DefaultPlacement;
+
+    public static bool IsValidIntervalMinutes(int minutes) =>
         minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
 }
 
