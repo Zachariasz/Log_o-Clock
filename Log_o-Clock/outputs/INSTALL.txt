@@ -1,17 +1,36 @@
-LOG O'CLOCK 1.142.2
+LOG O'CLOCK 1.142.3
 Created by Zachariasz Jędrzejczyk
 
 Recommended installation
 ------------------------
 Exit any currently running Project Time Tracker or Log O'clock tray app, then run
-installer\LogOClock-Setup-1.142.2.msi and approve the Windows
+installer\LogOClock-Setup-1.142.3.msi and approve the Windows
 administrator prompt. The installer adds Log O'clock to Program Files
 and creates a Start menu shortcut.
 
 Portable launch
 ---------------
-LogOClock-1.142.2-win-x64\LogOClock.exe is the same self-contained
+LogOClock-1.142.3-win-x64\LogOClock.exe is the same self-contained
 application without the installer. It does not require a separate .NET runtime.
+Automatic and manual update checks
+-----------------------------------
+Settings includes an Updates tab to configure automatic update checking against
+official GitHub releases or perform a check immediately. When a newer version is
+found, the app displays an update notification with a direct link to the release
+page where the latest installer can be downloaded. Update checks respect your
+privacy, send no user telemetry, and query only public GitHub release metadata.
+
+Repeating break reminders
+-------------------------
+Settings > Break reminders allows scheduling repeating reminders after a configurable
+interval of continuous tracked work (e.g. 30, 45, or 60 minutes). When the interval
+is reached, a dedicated dark-themed reminder window appears offering to take a break
+or snooze the reminder.
+
+Structured settings subtabs
+---------------------------
+Settings options are now organized into clear subtabs (General, Session & Idle,
+Break reminders, Updates, Trello, and Google Sheets) for effortless navigation.
 
 Time including short idle
 -------------------------

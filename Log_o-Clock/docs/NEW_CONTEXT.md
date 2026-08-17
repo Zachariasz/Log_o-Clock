@@ -4,7 +4,7 @@
 
 - Product: **Log O'clock**.
 - Author: **Zachariasz Jędrzejczyk**.
-- Current source version: **1.142.2**.
+- Current source version: **1.142.3**.
 - Platform: Windows x64, WPF, .NET 10 (`net10.0-windows10.0.19041.0`).
 - SDK pinned by `global.json`: **10.0.301**, rolling to the latest compatible feature band.
 - Persistence: per-profile SQLite, current schema **24**.
