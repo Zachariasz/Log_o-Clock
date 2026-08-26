@@ -4,9 +4,9 @@ using ProjectTimeTracker.Core;
 
 namespace ProjectTimeTracker.Infrastructure;
 
-public sealed class SqliteTrackerStore : ITrackerStore
+public sealed partial class SqliteTrackerStore : ITrackerStore
 {
-    private const int SchemaVersion = 24;
+    private const int SchemaVersion = 27;
     private static readonly TimeSpan MinimumEntryDuration = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly TimeZoneInfo _monthlyLogTimeZone;
@@ -187,12 +187,41 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 await ExecuteAsync(connection, MigrationV24Sql, cancellationToken);
             }
 
+            if (version < 25 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name = 'IsFrozen';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV25ProjectsSql, cancellationToken);
+            }
+
+            if (version < 25 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM pragma_table_info('RecognitionRules') WHERE name = 'IsEnabledBeforeProjectFreeze';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV25RecognitionRulesSql, cancellationToken);
+            }
+
+            if (version < 26 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM pragma_table_info('TimeEntries') WHERE name = 'IsCall';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV26Sql, cancellationToken);
+            }
+
             await ExecuteAsync(connection, SchemaV21IndexesSql, cancellationToken);
+            await ExecuteAsync(connection, ProfileSyncSchemaSql, cancellationToken);
 
             await EnsureSystemEntitiesAsync(connection, cancellationToken);
             await DeleteSubMinuteCompletedEntriesAsync(connection, transaction: null, entryId: null, cancellationToken);
             await DeleteUnusedNotificationTasksAsync(connection, transaction: null, cancellationToken);
             await SynchronizeTagsFromDescriptionsAsync(connection, cancellationToken);
+            await EnsureProfileSyncTriggersAsync(connection, cancellationToken);
             await ExecuteAsync(connection, $"PRAGMA user_version = {SchemaVersion};", cancellationToken);
         }
 
@@ -225,7 +254,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             runningCommand.CommandText =
                 """
                 SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
                 FROM TimeEntries
                 WHERE EndUtc IS NULL
                 LIMIT 1;
@@ -252,7 +281,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             await ExecuteInTransactionAsync(
                 connection,
                 transaction,
-                "UPDATE TimeEntries SET LastCheckpointUtc = $recovered, ModifiedUtc = $recovered WHERE Id = $id AND EndUtc IS NULL;",
+                "UPDATE TimeEntries SET LastCheckpointUtc = $recovered WHERE Id = $id AND EndUtc IS NULL;",
                 cancellationToken,
                 ("$recovered", Format(recoveredAtUtc)),
                 ("$id", running.Id.ToString("D")));
@@ -311,7 +340,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         QueryAsync(
             """
             SELECT Id, ClientId, Name, Color, IsArchived, DailyTargetHours, WeeklyTargetHours,
-                   MonthlyTargetHours, HourlyRate, Currency, CarryOverTargetDebtEnabled
+                   MonthlyTargetHours, HourlyRate, Currency, CarryOverTargetDebtEnabled, IsFrozen
             FROM Projects
             WHERE Id <> $system
               AND ($include = 1 OR IsArchived = 0)
@@ -741,6 +770,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
 
     public async Task<IReadOnlyList<ProjectSoftwareDefinition>> GetProjectSoftwareAsync(
         Guid? projectId = null,
+        bool includeFrozen = false,
         CancellationToken cancellationToken = default)
     {
         var rows = await QueryAsync(
@@ -771,6 +801,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
               AND s.IsHidden = 0
               AND s.IsGlobal = 0
               AND p.Id <> $unassigned
+              AND ($includeFrozen = 1 OR p.IsFrozen = 0)
               AND ($project IS NULL OR p.Id = $project)
             GROUP BY p.Id, p.Name, c.Name,
                      s.Id, s.ProcessName, s.Label, ps.IsExcluded
@@ -791,6 +822,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 reader.GetBoolean(8)),
             cancellationToken,
             ("$project", projectId?.ToString("D")),
+            ("$includeFrozen", includeFrozen ? 1 : 0),
             ("$global", SystemEntityIds.GlobalSoftwareScopeId.ToString("D")),
             ("$unassigned", SystemEntityIds.UnassignedProjectId.ToString("D")));
         var assignments = await QueryAsync(
@@ -876,7 +908,10 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$project", projectId.ToString("D")),
             ("$process", NormalizeProcessName(processName)));
 
-    public Task<IReadOnlyList<RecognitionRule>> GetRulesAsync(Guid? projectId = null, CancellationToken cancellationToken = default) =>
+    public Task<IReadOnlyList<RecognitionRule>> GetRulesAsync(
+        Guid? projectId = null,
+        bool includeFrozen = false,
+        CancellationToken cancellationToken = default) =>
         QueryAsync(
             """
             SELECT r.Id, r.ProjectId, r.TitlePattern, r.ProcessName, r.IsEnabled
@@ -885,6 +920,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             JOIN Clients c ON c.Id = p.ClientId
             WHERE ($project IS NULL OR r.ProjectId = $project)
               AND p.IsArchived = 0
+              AND ($includeFrozen = 1 OR p.IsFrozen = 0)
               AND c.IsArchived = 0
             ORDER BY r.TitlePattern COLLATE NOCASE;
             """,
@@ -895,7 +931,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 reader.IsDBNull(3) ? null : reader.GetString(3),
                 reader.GetBoolean(4)),
             cancellationToken,
-            ("$project", projectId?.ToString("D")));
+            ("$project", projectId?.ToString("D")),
+            ("$includeFrozen", includeFrozen ? 1 : 0));
 
     public Task<IReadOnlyList<RecognitionCandidate>> GetRecognitionCandidatesAsync(CancellationToken cancellationToken = default) =>
         QueryAsync(
@@ -906,7 +943,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             FROM RecognitionRules r
             JOIN Projects p ON p.Id = r.ProjectId
             JOIN Clients c ON c.Id = p.ClientId
-            WHERE r.IsEnabled = 1 AND p.IsArchived = 0 AND c.IsArchived = 0;
+            WHERE r.IsEnabled = 1 AND p.IsArchived = 0 AND p.IsFrozen = 0 AND c.IsArchived = 0;
             """,
             reader => new RecognitionCandidate(
                 new Project(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)), reader.GetString(2), reader.GetString(3), reader.GetBoolean(4)),
@@ -920,6 +957,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             SELECT p.Id, c.Id, c.Name, p.Name, p.Color
             FROM Projects p JOIN Clients c ON c.Id = p.ClientId
             WHERE p.IsArchived = 0
+              AND p.IsFrozen = 0
               AND c.IsArchived = 0
               AND p.Id <> $system
             ORDER BY c.Name COLLATE NOCASE, p.Name COLLATE NOCASE;
@@ -1676,9 +1714,18 @@ public sealed class SqliteTrackerStore : ITrackerStore
             connection,
             transaction,
             """
-            INSERT INTO RecognitionRules (Id, ProjectId, TitlePattern, ProcessName, IsEnabled)
-            SELECT $ruleId, $project, $name, NULL, 1
-            WHERE NOT EXISTS (
+            INSERT INTO RecognitionRules
+                (Id, ProjectId, TitlePattern, ProcessName, IsEnabled, IsEnabledBeforeProjectFreeze)
+            SELECT
+                $ruleId,
+                $project,
+                $name,
+                NULL,
+                CASE WHEN p.IsFrozen = 1 THEN 0 ELSE 1 END,
+                CASE WHEN p.IsFrozen = 1 THEN 1 ELSE NULL END
+            FROM Projects p
+            WHERE p.Id = $project
+              AND NOT EXISTS (
                 SELECT 1 FROM RecognitionRules
                 WHERE ProjectId = $project
                   AND TitlePattern = $name COLLATE NOCASE
@@ -1693,6 +1740,60 @@ public sealed class SqliteTrackerStore : ITrackerStore
         transaction.Commit();
         await connection.CloseAsync();
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+    }
+
+    public async Task SetProjectFrozenAsync(
+        Guid projectId,
+        bool isFrozen,
+        CancellationToken cancellationToken = default)
+    {
+        if (projectId == Guid.Empty || projectId == SystemEntityIds.UnassignedProjectId)
+        {
+            throw new ArgumentException("Choose a valid project.", nameof(projectId));
+        }
+
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        await ExecuteInTransactionAsync(
+            connection,
+            transaction,
+            "UPDATE Projects SET IsFrozen = $isFrozen WHERE Id = $id;",
+            cancellationToken,
+            ("$isFrozen", isFrozen ? 1 : 0),
+            ("$id", projectId.ToString("D")));
+
+        if (isFrozen)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                """
+                UPDATE RecognitionRules
+                SET IsEnabledBeforeProjectFreeze = IsEnabled,
+                    IsEnabled = 0
+                WHERE ProjectId = $project
+                  AND IsEnabledBeforeProjectFreeze IS NULL;
+                """,
+                cancellationToken,
+                ("$project", projectId.ToString("D")));
+        }
+        else
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                """
+                UPDATE RecognitionRules
+                SET IsEnabled = IsEnabledBeforeProjectFreeze,
+                    IsEnabledBeforeProjectFreeze = NULL
+                WHERE ProjectId = $project
+                  AND IsEnabledBeforeProjectFreeze IS NOT NULL;
+                """,
+                cancellationToken,
+                ("$project", projectId.ToString("D")));
+        }
+
+        transaction.Commit();
     }
 
     public Task UpdateProjectColorAsync(Guid projectId, string color, CancellationToken cancellationToken = default) =>
@@ -2837,7 +2938,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         var items = await QueryAsync(
             """
             SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                   DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                   DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
             FROM TimeEntries WHERE EndUtc IS NULL LIMIT 1;
             """,
             MapTimeEntry,
@@ -2852,7 +2953,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         var items = await QueryAsync(
             """
             SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                   DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                   DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
             FROM TimeEntries
             WHERE Id = $id
             LIMIT 1;
@@ -2917,9 +3018,9 @@ public sealed class SqliteTrackerStore : ITrackerStore
             transaction,
             """
             INSERT INTO TimeEntries
-                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid)
+                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
             VALUES
-                ($id, $project, NULL, NULL, $now, NULL, $now, 1, $source, $now, $now, 0);
+                ($id, $project, NULL, NULL, $now, NULL, $now, 1, $source, $now, $now, 0, 0);
             """,
             cancellationToken,
             ("$id", id.ToString("D")),
@@ -2991,7 +3092,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             command.CommandText =
                 """
                 SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
                 FROM TimeEntries
                 WHERE EndUtc IS NOT NULL AND EndUtc <= $now
                 ORDER BY EndUtc DESC, ModifiedUtc DESC
@@ -3051,9 +3152,9 @@ public sealed class SqliteTrackerStore : ITrackerStore
             transaction,
             """
             INSERT INTO TimeEntries
-                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid)
+                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
             VALUES
-                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, 0);
+                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, 0, 0);
             """,
             cancellationToken,
             ("$id", id.ToString("D")),
@@ -3095,7 +3196,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
         Guid? taskId,
         string? description,
         DateTimeOffset nowUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool? isCall = null)
     {
         description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         var newEntryId = Guid.NewGuid();
@@ -3110,7 +3212,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             command.CommandText =
                 """
                 SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
                 FROM TimeEntries
                 WHERE Id = $id AND EndUtc IS NULL
                 LIMIT 1;
@@ -3131,6 +3233,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
         var pending =
             running.ProjectId == SystemEntityIds.UnassignedProjectId ||
             taskId is null && description is null;
+        var newIsCall = isCall ?? running.IsCall;
         if (nowUtc < running.StartUtc)
         {
             nowUtc = running.StartUtc;
@@ -3163,9 +3266,9 @@ public sealed class SqliteTrackerStore : ITrackerStore
             transaction,
             """
             INSERT INTO TimeEntries
-                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid)
+                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
             VALUES
-                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, $paid);
+                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, $paid, $call);
             """,
             cancellationToken,
             ("$id", newEntryId.ToString("D")),
@@ -3175,7 +3278,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$now", Format(nowUtc)),
             ("$pending", pending ? 1 : 0),
             ("$source", (int)running.Source),
-            ("$paid", running.IsPaid ? 1 : 0));
+            ("$paid", running.IsPaid ? 1 : 0),
+            ("$call", newIsCall ? 1 : 0));
 
         await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
 
@@ -3194,7 +3298,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             running.Source,
             nowUtc,
             nowUtc,
-            running.IsPaid);
+            running.IsPaid,
+            newIsCall);
     }
 
     public async Task<TimeEntry> SwitchRunningTimerAsync(
@@ -3219,7 +3324,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             command.CommandText =
                 """
                 SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
                 FROM TimeEntries
                 WHERE Id = $id AND EndUtc IS NULL
                 LIMIT 1;
@@ -3272,9 +3377,9 @@ public sealed class SqliteTrackerStore : ITrackerStore
             transaction,
             """
             INSERT INTO TimeEntries
-                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid)
+                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
             VALUES
-                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, 0);
+                ($id, $project, $task, $description, $now, NULL, $now, $pending, $source, $now, $now, 0, $call);
             """,
             cancellationToken,
             ("$id", newEntryId.ToString("D")),
@@ -3283,7 +3388,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             ("$description", description),
             ("$now", Format(nowUtc)),
             ("$pending", startedPending ? 1 : 0),
-            ("$source", (int)source));
+            ("$source", (int)source),
+            ("$call", running.IsCall ? 1 : 0));
 
         await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
 
@@ -3301,7 +3407,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
             startedPending,
             source,
             nowUtc,
-            nowUtc);
+            nowUtc,
+            IsCall: running.IsCall);
     }
 
     public async Task<TimeEntry?> StopRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
@@ -3344,7 +3451,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
 
     public Task CheckpointRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default) =>
         ExecuteParameterizedAsync(
-            "UPDATE TimeEntries SET LastCheckpointUtc = $now, ModifiedUtc = $now WHERE EndUtc IS NULL;",
+            "UPDATE TimeEntries SET LastCheckpointUtc = $now WHERE EndUtc IS NULL;",
             cancellationToken,
             ("$now", Format(nowUtc)));
 
@@ -3370,7 +3477,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             command.CommandText =
                 """
                 SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
-                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid
+                   DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
                 FROM TimeEntries
                 WHERE Id = $id AND EndUtc IS NULL
                 LIMIT 1;
@@ -3522,7 +3629,15 @@ public sealed class SqliteTrackerStore : ITrackerStore
         await SynchronizeMonthlyLogFilesAsync(cancellationToken);
     }
 
-    public async Task AddManualEntryAsync(Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, CancellationToken cancellationToken = default)
+    public async Task AddManualEntryAsync(
+        Guid projectId,
+        Guid? taskId,
+        string? description,
+        DateTimeOffset startUtc,
+        DateTimeOffset endUtc,
+        bool isPaid = false,
+        bool isCall = false,
+        CancellationToken cancellationToken = default)
     {
         ValidateRange(startUtc, endUtc);
         if (endUtc - startUtc < MinimumEntryDuration)
@@ -3540,14 +3655,15 @@ public sealed class SqliteTrackerStore : ITrackerStore
             transaction,
             """
             INSERT INTO TimeEntries
-                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid)
+                (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
             VALUES
-                ($id, $project, $task, $description, $start, $end, $end, $pending, $source, $now, $now, $paid);
+                ($id, $project, $task, $description, $start, $end, $end, $pending, $source, $now, $now, $paid, $call);
             """,
             cancellationToken,
             ("$id", Guid.NewGuid().ToString("D")), ("$project", projectId.ToString("D")), ("$task", taskId?.ToString("D")),
             ("$description", description), ("$start", Format(startUtc)), ("$end", Format(endUtc)),
-            ("$pending", pending ? 1 : 0), ("$source", (int)TrackingSource.Manual), ("$now", Format(now)), ("$paid", isPaid ? 1 : 0));
+            ("$pending", pending ? 1 : 0), ("$source", (int)TrackingSource.Manual), ("$now", Format(now)),
+            ("$paid", isPaid ? 1 : 0), ("$call", isCall ? 1 : 0));
         await EnsureTagsForDescriptionAsync(connection, transaction, description, projectId, cancellationToken);
         transaction.Commit();
         await connection.CloseAsync();
@@ -3563,7 +3679,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
         DateTimeOffset endUtc,
         bool isPaid = false,
         long excludedSeconds = 0,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool? isCall = null)
     {
         ValidateRange(startUtc, endUtc);
         if (excludedSeconds < 0 || excludedSeconds > (long)(endUtc - startUtc).TotalSeconds)
@@ -3583,13 +3700,16 @@ public sealed class SqliteTrackerStore : ITrackerStore
             """
             UPDATE TimeEntries SET ProjectId = $project, TaskId = $task, Description = $description,
                 StartUtc = $start, EndUtc = $end, LastCheckpointUtc = $end,
-                DetailsPending = $pending, ModifiedUtc = $now, IsPaid = $paid
+                DetailsPending = $pending, ModifiedUtc = $now, IsPaid = $paid,
+                IsCall = COALESCE($call, IsCall)
             WHERE Id = $id AND EndUtc IS NOT NULL;
             """,
             cancellationToken,
             ("$project", projectId.ToString("D")), ("$task", taskId?.ToString("D")), ("$description", description),
             ("$start", Format(startUtc)), ("$end", Format(endUtc)), ("$pending", pending ? 1 : 0),
-            ("$now", Format(DateTimeOffset.UtcNow)), ("$paid", isPaid ? 1 : 0), ("$id", entryId.ToString("D")));
+            ("$now", Format(DateTimeOffset.UtcNow)), ("$paid", isPaid ? 1 : 0),
+            ("$call", isCall is null ? DBNull.Value : isCall.Value ? 1 : 0),
+            ("$id", entryId.ToString("D")));
         await ExecuteInTransactionAsync(
             connection,
             transaction,
@@ -3755,6 +3875,14 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 ("$reason", Required(period.Reason, nameof(period.Reason))));
         }
 
+        await ExecuteInTransactionAsync(
+            connection,
+            transaction,
+            "UPDATE TimeEntries SET ModifiedUtc = $modified WHERE Id = $entry;",
+            cancellationToken,
+            ("$modified", Format(DateTimeOffset.UtcNow)),
+            ("$entry", entryId.ToString("D")));
+
         await DeleteSubMinuteCompletedEntriesAsync(connection, transaction, entryId, cancellationToken);
         await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
         transaction.Commit();
@@ -3799,6 +3927,17 @@ public sealed class SqliteTrackerStore : ITrackerStore
             inserted = await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
+        if (inserted > 0)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "UPDATE TimeEntries SET ModifiedUtc = $modified WHERE Id = $entry;",
+                cancellationToken,
+                ("$modified", Format(DateTimeOffset.UtcNow)),
+                ("$entry", entryId.ToString("D")));
+        }
+
         transaction.Commit();
         await connection.CloseAsync();
         if (inserted > 0)
@@ -3819,7 +3958,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                    e.StartUtc, e.EndUtc,
                    COALESCE((SELECT SUM(CAST(strftime('%s', x.EndUtc) AS INTEGER) - CAST(strftime('%s', x.StartUtc) AS INTEGER))
                              FROM TimeExclusions x WHERE x.TimeEntryId = e.Id), 0),
-                   e.DetailsPending, e.Source, e.IsPaid, p.HourlyRate, p.Currency,
+                   e.DetailsPending, e.Source, e.IsPaid, e.IsCall, p.HourlyRate, p.Currency,
                    COALESCE((
                        SELECT group_concat(SoftwareLabel, ' · ')
                        FROM (
@@ -3829,7 +3968,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                            WHERE es.TimeEntryId = e.Id
                            ORDER BY s.Label COLLATE NOCASE
                        )
-                   ), '')
+                   ), ''), e.CreatedUtc, e.ModifiedUtc
             FROM TimeEntries e
             JOIN Projects p ON p.Id = e.ProjectId
             JOIN Clients c ON c.Id = p.ClientId
@@ -3862,7 +4001,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                    e.StartUtc, e.EndUtc,
                    COALESCE((SELECT SUM(CAST(strftime('%s', x.EndUtc) AS INTEGER) - CAST(strftime('%s', x.StartUtc) AS INTEGER))
                              FROM TimeExclusions x WHERE x.TimeEntryId = e.Id), 0),
-                   e.DetailsPending, e.Source, e.IsPaid, p.HourlyRate, p.Currency,
+                   e.DetailsPending, e.Source, e.IsPaid, e.IsCall, p.HourlyRate, p.Currency,
                    COALESCE((
                        SELECT group_concat(SoftwareLabel, ' · ')
                        FROM (
@@ -3872,7 +4011,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                            WHERE es.TimeEntryId = e.Id
                            ORDER BY s.Label COLLATE NOCASE
                        )
-                   ), '')
+                   ), ''), e.CreatedUtc, e.ModifiedUtc
             FROM TimeEntries e
             JOIN Projects p ON p.Id = e.ProjectId
             JOIN Clients c ON c.Id = p.ClientId
@@ -3920,6 +4059,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                        p.HourlyRate,
                        p.Currency,
                        e.IsPaid,
+                       e.IsCall,
                        MIN(COALESCE(e.EndUtc, $now), $to) AS LatestActivityUtc,
                        MAX(0,
                            CAST(strftime('%s', MIN(COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
@@ -3973,7 +4113,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
                    Currency,
                    CAST(SUM(CASE WHEN IsPaid = 1 THEN DurationSeconds ELSE 0 END) AS INTEGER),
                    CAST(SUM(CASE WHEN IsPaid = 0 THEN DurationSeconds ELSE 0 END) AS INTEGER),
-                   MAX(LatestActivityUtc)
+                   MAX(LatestActivityUtc),
+                   CAST(SUM(CASE WHEN IsCall = 1 THEN DurationSeconds ELSE 0 END) AS INTEGER)
             FROM EntryDurations
             GROUP BY ProjectId, TaskId, ClientName, ProjectName, TaskName, HourlyRate, Currency
             ORDER BY ClientName COLLATE NOCASE, ProjectName COLLATE NOCASE, TaskName COLLATE NOCASE;
@@ -3991,7 +4132,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
                 reader.GetInt64(10),
                 reader.GetInt64(11),
                 reader.IsDBNull(12) ? null : Parse(reader.GetString(12)),
-                reader.GetInt64(6)),
+                reader.GetInt64(6),
+                reader.GetInt64(13)),
             cancellationToken,
             ("$from", Format(fromUtc)),
             ("$to", Format(toUtc)),
@@ -4045,7 +4187,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                        e.StartUtc, e.EndUtc,
                        COALESCE((SELECT SUM(CAST(strftime('%s', x.EndUtc) AS INTEGER) - CAST(strftime('%s', x.StartUtc) AS INTEGER))
                                  FROM TimeExclusions x WHERE x.TimeEntryId = e.Id), 0),
-                       e.DetailsPending, e.Source, e.IsPaid, p.HourlyRate, p.Currency,
+                       e.DetailsPending, e.Source, e.IsPaid, e.IsCall, p.HourlyRate, p.Currency,
                        COALESCE((
                            SELECT group_concat(SoftwareLabel, ' · ')
                            FROM (
@@ -4055,7 +4197,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
                                WHERE es.TimeEntryId = e.Id
                                ORDER BY s.Label COLLATE NOCASE
                            )
-                       ), '')
+                       ), ''), e.CreatedUtc, e.ModifiedUtc
                 FROM TimeEntries e
                 JOIN Projects p ON p.Id = e.ProjectId
                 JOIN Clients c ON c.Id = p.ClientId
@@ -4991,7 +5133,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
         (TrackingSource)reader.GetInt32(8),
         Parse(reader.GetString(9)),
         Parse(reader.GetString(10)),
-        reader.GetBoolean(11));
+        reader.GetBoolean(11),
+        reader.GetBoolean(12));
 
     private static SavedTask MapSavedTask(SqliteDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
@@ -5015,9 +5158,12 @@ public sealed class SqliteTrackerStore : ITrackerStore
         reader.GetBoolean(10),
         (TrackingSource)reader.GetInt32(11),
         reader.GetBoolean(12),
-        reader.IsDBNull(13) ? null : Convert.ToDecimal(reader.GetDouble(13), CultureInfo.InvariantCulture),
-        reader.GetString(14),
-        reader.GetString(15));
+        reader.IsDBNull(14) ? null : Convert.ToDecimal(reader.GetDouble(14), CultureInfo.InvariantCulture),
+        reader.GetString(15),
+        reader.GetString(16),
+        reader.GetBoolean(13),
+        Parse(reader.GetString(17)),
+        Parse(reader.GetString(18)));
 
     private static Project MapProject(SqliteDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
@@ -5030,7 +5176,8 @@ public sealed class SqliteTrackerStore : ITrackerStore
         reader.IsDBNull(7) ? null : reader.GetDouble(7),
         reader.IsDBNull(8) ? null : Convert.ToDecimal(reader.GetDouble(8), CultureInfo.InvariantCulture),
         reader.GetString(9),
-        reader.GetBoolean(10));
+        reader.GetBoolean(10),
+        IsFrozen: reader.GetBoolean(11));
 
     private static TagDefinition MapTagDefinition(SqliteDataReader reader) => new(
         Guid.Parse(reader.GetString(0)),
@@ -5189,6 +5336,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             Name TEXT NOT NULL COLLATE NOCASE,
             Color TEXT NOT NULL,
             IsArchived INTEGER NOT NULL DEFAULT 0 CHECK (IsArchived IN (0, 1)),
+            IsFrozen INTEGER NOT NULL DEFAULT 0 CHECK (IsFrozen IN (0, 1)),
             DailyTargetHours REAL NULL CHECK (DailyTargetHours IS NULL OR DailyTargetHours > 0),
             WeeklyTargetHours REAL NULL CHECK (WeeklyTargetHours IS NULL OR WeeklyTargetHours > 0),
             MonthlyTargetHours REAL NULL CHECK (MonthlyTargetHours IS NULL OR MonthlyTargetHours > 0),
@@ -5301,6 +5449,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             TitlePattern TEXT NOT NULL COLLATE NOCASE,
             ProcessName TEXT NULL COLLATE NOCASE,
             IsEnabled INTEGER NOT NULL DEFAULT 1 CHECK (IsEnabled IN (0, 1)),
+            IsEnabledBeforeProjectFreeze INTEGER NULL CHECK (IsEnabledBeforeProjectFreeze IN (0, 1)),
             UNIQUE (ProjectId, TitlePattern, ProcessName)
         );
 
@@ -5317,6 +5466,7 @@ public sealed class SqliteTrackerStore : ITrackerStore
             CreatedUtc TEXT NOT NULL,
             ModifiedUtc TEXT NOT NULL,
             IsPaid INTEGER NOT NULL DEFAULT 0 CHECK (IsPaid IN (0, 1)),
+            IsCall INTEGER NOT NULL DEFAULT 0 CHECK (IsCall IN (0, 1)),
             CHECK (EndUtc IS NULL OR EndUtc >= StartUtc)
         );
 
@@ -5565,6 +5715,21 @@ public sealed class SqliteTrackerStore : ITrackerStore
         ALTER TABLE SavedTasksV24 RENAME TO SavedTasks;
 
         PRAGMA foreign_keys = ON;
+        """;
+
+    private const string MigrationV25ProjectsSql = """
+        ALTER TABLE Projects
+        ADD COLUMN IsFrozen INTEGER NOT NULL DEFAULT 0 CHECK (IsFrozen IN (0, 1));
+        """;
+
+    private const string MigrationV25RecognitionRulesSql = """
+        ALTER TABLE RecognitionRules
+        ADD COLUMN IsEnabledBeforeProjectFreeze INTEGER NULL CHECK (IsEnabledBeforeProjectFreeze IN (0, 1));
+        """;
+
+    private const string MigrationV26Sql = """
+        ALTER TABLE TimeEntries
+        ADD COLUMN IsCall INTEGER NOT NULL DEFAULT 0 CHECK (IsCall IN (0, 1));
         """;
 
     private const string SchemaV21IndexesSql = """

@@ -105,6 +105,7 @@ public partial class EntryEditorWindow : Window
         EndTimeText.Text = AppTextCulture.FormatShortTime(endLocal);
         DescriptionText.Text = _existing?.Description ?? string.Empty;
         PaidCheck.IsChecked = _existing?.IsPaid == true;
+        CallCheck.IsChecked = _existing?.IsCall == true;
         SoftwarePanel.Visibility = string.IsNullOrWhiteSpace(_existing?.SoftwareLabels)
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -569,7 +570,8 @@ public partial class EntryEditorWindow : Window
             start,
             end,
             PaidCheck.IsChecked == true,
-            excludedSeconds);
+            excludedSeconds,
+            CallCheck.IsChecked == true);
         if (closeDialog)
         {
             DialogResult = true;
@@ -940,4 +942,5 @@ public sealed record EntryEditResult(
     DateTimeOffset StartUtc,
     DateTimeOffset EndUtc,
     bool IsPaid,
-    long ExcludedSeconds);
+    long ExcludedSeconds,
+    bool IsCall);

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using ProjectTimeTracker.Core;
 using ProjectTimeTracker.Infrastructure;
@@ -70,6 +71,38 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await _store.SetSettingAsync(ShortIdleReportingSettings.MaximumMinutesKey, "20");
         var stricterRow = Assert.Single(await _store.GetReportAsync(start, start.AddHours(4)));
         Assert.Equal(2 * 3600, stricterRow.DurationWithShortIdleSeconds);
+    }
+
+    [Fact]
+    public async Task ReportsCountNetCallTimeForTheEntryProject()
+    {
+        var client = await _store.AddClientAsync("Call report client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Call report project", "#223344");
+        var start = new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero);
+        await _store.AddManualEntryAsync(
+            project.Id,
+            null,
+            "Client call",
+            start,
+            start.AddHours(3),
+            isCall: true);
+        var callEntry = Assert.Single(await _store.GetEntriesAsync(start, start.AddHours(3)));
+        await _store.AddExclusionAsync(
+            callEntry.Id,
+            start.AddHours(1),
+            start.AddHours(1.5),
+            "Idle");
+        await _store.AddManualEntryAsync(
+            project.Id,
+            null,
+            "Project work",
+            start.AddHours(3),
+            start.AddHours(5));
+
+        var report = Assert.Single(await _store.GetReportAsync(start, start.AddHours(5)));
+        Assert.Equal(16_200, report.DurationSeconds);
+        Assert.Equal(9_000, report.CallDurationSeconds);
+        Assert.True(callEntry.IsCall);
     }
 
     [Fact]
@@ -186,6 +219,63 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         var rules = await _store.GetRulesAsync(project.Id);
         var rule = Assert.Single(rules);
         Assert.Equal("Phoenix", rule.TitlePattern);
+    }
+
+    [Fact]
+    public async Task FreezingProjectPreservesDataAndRestoresPriorRecognitionRuleStates()
+    {
+        var client = await _store.AddClientAsync("Freeze client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Freeze project", "#445566");
+        var task = await _store.AddTaskAsync(project.Id, "Keep this task");
+        var disabledRule = await _store.AddRuleAsync(project.Id, "Disabled rule", null);
+        var start = new DateTimeOffset(2026, 8, 24, 8, 0, 0, TimeSpan.Zero);
+        await _store.AddManualEntryAsync(project.Id, task.Id, "Keep this entry", start, start.AddHours(1));
+
+        await using (var connection = new SqliteConnection($"Data Source={_store.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE RecognitionRules SET IsEnabled = 0 WHERE Id = $id;";
+            command.Parameters.AddWithValue("$id", disabledRule.Id.ToString("D"));
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await _store.SetProjectFrozenAsync(project.Id, isFrozen: true);
+
+        Assert.True(Assert.Single(await _store.GetProjectsAsync()).IsFrozen);
+        Assert.Empty(await _store.GetProjectOptionsAsync());
+        Assert.Empty(await _store.GetRulesAsync(project.Id));
+        Assert.Equal(2, (await _store.GetRulesAsync(project.Id, includeFrozen: true)).Count);
+        Assert.Empty(await _store.GetRecognitionCandidatesAsync());
+        Assert.Contains(await _store.GetTasksAsync(project.Id), item => item.Id == task.Id);
+        Assert.Contains(
+            await _store.GetEntriesAsync(start.AddMinutes(-1), start.AddHours(2)),
+            item => item.Description == "Keep this entry");
+
+        await using (var connection = new SqliteConnection($"Data Source={_store.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT IsEnabled, IsEnabledBeforeProjectFreeze FROM RecognitionRules WHERE ProjectId = $project ORDER BY TitlePattern;";
+            command.Parameters.AddWithValue("$project", project.Id.ToString("D"));
+            await using var reader = await command.ExecuteReaderAsync();
+            var states = new List<(int IsEnabled, int WasEnabled)>();
+            while (await reader.ReadAsync())
+            {
+                states.Add((reader.GetInt32(0), reader.GetInt32(1)));
+            }
+
+            Assert.Equal([(0, 0), (0, 1)], states);
+        }
+
+        await _store.SetProjectFrozenAsync(project.Id, isFrozen: false);
+
+        Assert.False(Assert.Single(await _store.GetProjectsAsync()).IsFrozen);
+        Assert.Single(await _store.GetProjectOptionsAsync());
+        var restoredRules = await _store.GetRulesAsync(project.Id);
+        Assert.Equal(2, restoredRules.Count);
+        Assert.False(restoredRules.Single(rule => rule.Id == disabledRule.Id).IsEnabled);
+        Assert.Single(await _store.GetRecognitionCandidatesAsync());
     }
 
     [Fact]
@@ -680,6 +770,34 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.Equal(switchAt, stoppedFirst.EndUtc);
         Assert.True(stoppedFirst.IsPaid);
         Assert.Equal(switchAt, stoppedSecond.StartUtc);
+    }
+
+    [Fact]
+    public async Task SplittingRunningTimerForACallKeepsExactProjectBoundaries()
+    {
+        var (project, _) = await CreateTwoProjectsAsync();
+        var start = new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero);
+        var initial = await _store.StartTimerAsync(project.Id, TrackingSource.Manual, start);
+
+        var call = await _store.SplitRunningTimerAsync(
+            initial.Id,
+            null,
+            null,
+            start.AddMinutes(2),
+            isCall: true);
+        await _store.StopRunningTimerAsync(start.AddMinutes(5));
+
+        var entries = await _store.GetEntriesAsync(start.AddMinutes(-1), start.AddMinutes(6));
+        var work = Assert.Single(entries, entry => entry.Id == initial.Id);
+        var callEntry = Assert.Single(entries, entry => entry.Id == call.Id);
+        Assert.False(work.IsCall);
+        Assert.True(callEntry.IsCall);
+        Assert.Equal(start.AddMinutes(2), work.EndUtc);
+        Assert.Equal(start.AddMinutes(2), callEntry.StartUtc);
+
+        var report = Assert.Single(await _store.GetReportAsync(start, start.AddMinutes(5)));
+        Assert.Equal(5 * 60, report.DurationSeconds);
+        Assert.Equal(3 * 60, report.CallDurationSeconds);
     }
 
     [Fact]
@@ -2022,6 +2140,51 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VersionTwentyFourUpgradeAddsProjectFreezeColumnsWithBackup()
+    {
+        await using (var connection = new SqliteConnection($"Data Source={_store.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                ALTER TABLE RecognitionRules DROP COLUMN IsEnabledBeforeProjectFreeze;
+                ALTER TABLE Projects DROP COLUMN IsFrozen;
+                PRAGMA user_version = 24;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await _store.InitializeAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={_store.DatabasePath}");
+        await verification.OpenAsync();
+        Assert.Contains("IsFrozen", await ReadColumnNamesAsync(verification, "Projects"));
+        Assert.Contains(
+            "IsEnabledBeforeProjectFreeze",
+            await ReadColumnNamesAsync(verification, "RecognitionRules"));
+        Assert.NotEmpty(Directory.GetFiles(_directory, "test.db.backup-v24-*"));
+    }
+
+    [Fact]
+    public async Task VersionTwentyFiveUpgradeAddsCallFlagWithBackup()
+    {
+        await using (var connection = new SqliteConnection($"Data Source={_store.DatabasePath}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE TimeEntries DROP COLUMN IsCall; PRAGMA user_version = 25;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await _store.InitializeAsync();
+
+        await using var verification = new SqliteConnection($"Data Source={_store.DatabasePath}");
+        await verification.OpenAsync();
+        Assert.Contains("IsCall", await ReadColumnNamesAsync(verification, "TimeEntries"));
+        Assert.NotEmpty(Directory.GetFiles(_directory, "test.db.backup-v25-*"));
+    }
+
+    [Fact]
     public async Task VersionOneDatabaseMigratesWithoutLosingCompatibility()
     {
         var legacyPath = Path.Combine(_directory, "legacy.db");
@@ -2051,6 +2214,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.Contains("HourlyRate", projectColumns);
         Assert.Contains("Currency", projectColumns);
         Assert.Contains("IsPaid", entryColumns);
+        Assert.Contains("IsCall", entryColumns);
         Assert.Equal(["Id", "Name", "Color", "IsGlobal"], await ReadColumnNamesAsync(verification, "Tags"));
         Assert.Equal(
             ["Id", "ProcessName", "Label", "IsExcluded", "IsHidden", "IsGlobal"],
@@ -2743,7 +2907,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GoogleSheetsSyncCreatesDailyWorksheetsAndPreservesRemoteOnlyRows()
+    public async Task GoogleSheetsSyncCreatesDailyWorksheetsAndArchivesLegacyRemoteOnlyRows()
     {
         var client = await _store.AddClientAsync("Sheets client", "#112233");
         var project = await _store.AddProjectAsync(client.Id, "Sheets project", "#445566");
@@ -2751,6 +2915,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await _store.AddManualEntryAsync(project.Id, null, "Synced work", start, start.AddHours(1));
         var credentialStore = new FakeCredentialStore();
         var api = new FakeGoogleSheetsApiClient();
+        api.Worksheets.Add("2026-05-04");
         await using var service = new GoogleSheetsSyncService(
             _store,
             api,
@@ -2769,11 +2934,16 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.Equal(1, result.WorksheetCount);
         Assert.Equal(1, api.CreateCalls);
         Assert.Equal(1, api.AddBatchCalls);
-        Assert.Equal(1, api.ReadBatchCalls);
+        Assert.Equal(2, api.ReadBatchCalls);
         Assert.Equal(1, api.WriteBatchCalls);
         Assert.Contains("2026-05-04", api.Worksheets);
         var rows = api.Written["2026-05-04"];
-        Assert.Contains(rows, row => row.Count > 0 && Equals(row[0], FakeGoogleSheetsApiClient.RemoteOnlyEntryId));
+        Assert.Equal("Call", rows[0][17]);
+        Assert.Equal("Created at", rows[0][18]);
+        Assert.Equal("Last modified", rows[0][19]);
+        Assert.Contains(
+            api.TechnicalRows["Legacy Review"],
+            row => row.Any(value => value?.ToString()?.Contains(FakeGoogleSheetsApiClient.RemoteOnlyEntryId, StringComparison.Ordinal) == true));
         Assert.Contains(rows, row => row.Count > 8 && Equals(row[8], "Synced work"));
         Assert.Equal(
             LogExportDestinationSettings.GoogleSheets,
@@ -2809,7 +2979,114 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GoogleSheetsSyncRemovesExplicitlyDeletedEntryButKeepsRecoveryRows()
+    public async Task GoogleSheetsSyncUpgradesLegacyConnectionMetadataBeforeSynchronizing()
+    {
+        const string legacyConnection =
+            """
+            {
+              "Email": "person@example.com",
+              "DisplayName": "Person",
+              "SpreadsheetId": "legacy-sheet",
+              "SpreadsheetUrl": "https://docs.google.com/spreadsheets/d/legacy-sheet/edit",
+              "StoreExportsInGoogleSheets": true
+            }
+            """;
+        await _store.SetSettingAsync(GoogleSheetsSettings.ConnectionKey, legacyConnection);
+        await _store.SetSettingAsync(
+            LogExportDestinationSettings.DestinationKey,
+            LogExportDestinationSettings.GoogleSheets);
+        var profileId = Guid.NewGuid();
+        var credentialStore = new FakeCredentialStore();
+        await credentialStore.SetGoogleSheetsCredentialsAsync(
+            profileId,
+            new GoogleSheetsCredentials("desktop-client", "desktop-secret", "refresh-token"));
+        var api = new FakeGoogleSheetsApiClient();
+        await using var service = new GoogleSheetsSyncService(
+            _store,
+            api,
+            new FakeGoogleAuthorizationBroker(),
+            credentialStore,
+            profileId,
+            "Legacy profile",
+            new FixedClock(new DateTimeOffset(2026, 8, 26, 12, 0, 0, TimeSpan.Zero)),
+            TimeZoneInfo.Utc);
+
+        var migratedBeforeSync = await service.GetConnectionAsync();
+        Assert.NotNull(migratedBeforeSync?.SyncProfileId);
+        Assert.NotEqual(Guid.Empty, migratedBeforeSync!.SyncProfileId);
+        Assert.NotNull(migratedBeforeSync.DeviceId);
+        Assert.NotEqual(Guid.Empty, migratedBeforeSync.DeviceId);
+        Assert.False(string.IsNullOrWhiteSpace(migratedBeforeSync.DeviceName));
+        Assert.Equal(TimeZoneInfo.Utc.Id, migratedBeforeSync.PinnedTimeZoneId);
+        Assert.Equal(0, migratedBeforeSync.SyncProtocolVersion);
+
+        await service.SyncNowAsync();
+
+        var migratedAfterSync = await service.GetConnectionAsync();
+        Assert.Equal(migratedBeforeSync.SyncProfileId, migratedAfterSync?.SyncProfileId);
+        Assert.Equal(migratedBeforeSync.DeviceId, migratedAfterSync?.DeviceId);
+        Assert.Equal(GoogleSheetsSyncService.CurrentSyncProtocolVersion, migratedAfterSync?.SyncProtocolVersion);
+        Assert.Contains("__LogOClockChanges", api.Worksheets);
+        Assert.Contains("__LogOClockDevices", api.Worksheets);
+        Assert.Contains("__LogOClockProfile", api.Worksheets);
+    }
+
+    [Fact]
+    public async Task GoogleSheetsExistingSpreadsheetJoinValidatesMetadataAndRequiresEmptyProfile()
+    {
+        var emptyDirectory = Path.Combine(_directory, "join-empty");
+        await using var empty = new SqliteTrackerStore(Path.Combine(emptyDirectory, "TimeTracker.db"), emptyDirectory, TimeZoneInfo.Utc);
+        await empty.InitializeAsync();
+        var api = new FakeGoogleSheetsApiClient();
+        api.Worksheets.UnionWith(["__LogOClockProfile", "__LogOClockChanges", "__LogOClockDevices"]);
+        var sharedProfileId = Guid.NewGuid();
+        api.TechnicalRows["__LogOClockProfile"] =
+        [
+            ["Key", "Value"],
+            ["ProtocolVersion", "1"],
+            ["ProfileId", sharedProfileId.ToString("D")],
+            ["ProfileName", "Shared work"],
+            ["PinnedTimeZoneId", TimeZoneInfo.Utc.Id],
+        ];
+        await using var joinService = new GoogleSheetsSyncService(
+            empty,
+            api,
+            new FakeGoogleAuthorizationBroker(),
+            new FakeCredentialStore(),
+            Guid.NewGuid(),
+            "Empty",
+            new FixedClock(new DateTimeOffset(2026, 8, 23, 12, 0, 0, TimeSpan.Zero)),
+            TimeZoneInfo.Utc);
+
+        var joined = await joinService.ConnectExistingAsync(
+            "desktop-client",
+            "desktop-secret",
+            "https://docs.google.com/spreadsheets/d/abcdefgh12345678/edit#gid=0");
+        Assert.Equal("abcdefgh12345678", joined.SpreadsheetId);
+        Assert.Equal(sharedProfileId, joined.SyncProfileId);
+        Assert.Equal("UTC", joined.PinnedTimeZoneId);
+
+        var occupiedDirectory = Path.Combine(_directory, "join-occupied");
+        await using var occupied = new SqliteTrackerStore(Path.Combine(occupiedDirectory, "TimeTracker.db"), occupiedDirectory, TimeZoneInfo.Utc);
+        await occupied.InitializeAsync();
+        _ = await occupied.AddClientAsync("Local data", "#112233");
+        await using var occupiedService = new GoogleSheetsSyncService(
+            occupied,
+            api,
+            new FakeGoogleAuthorizationBroker(),
+            new FakeCredentialStore(),
+            Guid.NewGuid(),
+            "Occupied",
+            new FixedClock(DateTimeOffset.UtcNow),
+            TimeZoneInfo.Utc);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => occupiedService.ConnectExistingAsync(
+            "desktop-client",
+            "desktop-secret",
+            "abcdefgh12345678"));
+    }
+
+    [Fact]
+    public async Task GoogleSheetsSyncRemovesExplicitlyDeletedEntryAndKeepsDurableDeletionState()
     {
         var client = await _store.AddClientAsync("Mirror client", "#112233");
         var project = await _store.AddProjectAsync(client.Id, "Mirror project", "#445566");
@@ -2817,6 +3094,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await _store.AddManualEntryAsync(project.Id, null, "Delete from mirror", start, start.AddHours(1));
         var entry = Assert.Single(await _store.GetEntriesAsync(start.AddMinutes(-1), start.AddHours(2)));
         var api = new FakeGoogleSheetsApiClient();
+        api.Worksheets.Add("2026-05-06");
         await using var service = new GoogleSheetsSyncService(
             _store,
             api,
@@ -2837,8 +3115,292 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
 
         var rows = api.Written["2026-05-06"];
         Assert.DoesNotContain(rows, row => Equals(row[0], entry.Id.ToString("D")));
-        Assert.Contains(rows, row => Equals(row[0], FakeGoogleSheetsApiClient.RemoteOnlyEntryId));
-        Assert.Empty(await _store.GetGoogleSheetsEntryDeletionIdsAsync());
+        Assert.Contains(
+            api.TechnicalRows["Legacy Review"],
+            row => row.Any(value => value?.ToString()?.Contains(FakeGoogleSheetsApiClient.RemoteOnlyEntryId, StringComparison.Ordinal) == true));
+        Assert.Contains(entry.Id, await _store.GetGoogleSheetsEntryDeletionIdsAsync());
+    }
+
+    [Fact]
+    public async Task ProfileSyncReconcilesBlankDeviceOfflineAdditionAndTrueEntryFork()
+    {
+        var firstDirectory = Path.Combine(_directory, "sync-first");
+        var secondDirectory = Path.Combine(_directory, "sync-second");
+        await using var first = new SqliteTrackerStore(Path.Combine(firstDirectory, "TimeTracker.db"), firstDirectory, TimeZoneInfo.Utc);
+        await using var second = new SqliteTrackerStore(Path.Combine(secondDirectory, "TimeTracker.db"), secondDirectory, TimeZoneInfo.Utc);
+        await first.InitializeAsync();
+        await second.InitializeAsync();
+
+        var client = await first.AddClientAsync("Shared client", "#112233");
+        var project = await first.AddProjectAsync(client.Id, "Shared project", "#445566");
+        var task = await first.AddTaskAsync(project.Id, "Shared task");
+        var firstSoftware = await first.AddSoftwareAsync("first-edit.exe", "First edit app", project.Id, false, []);
+        var secondSoftware = await first.AddSoftwareAsync("second-edit.exe", "Second edit app", project.Id, false, []);
+        var start = new DateTimeOffset(2026, 8, 20, 8, 0, 0, TimeSpan.Zero);
+        await first.AddManualEntryAsync(project.Id, task.Id, "Initial", start, start.AddHours(1));
+        var original = Assert.Single(await first.GetEntriesAsync(start, start.AddHours(2)));
+        await first.AddExclusionAsync(original.Id, start.AddMinutes(20), start.AddMinutes(25), "Break");
+
+        var firstDevice = Guid.NewGuid();
+        var initial = await first.CaptureProfileSyncChangesAsync(firstDevice, "First", seedAll: true);
+        await first.AcknowledgeProfileSyncChangesAsync(initial.Select(change => change.RevisionId).ToArray());
+        var joined = await second.ReconcileProfileSyncChangesAsync(initial);
+
+        Assert.True(joined.DataChanged);
+        var imported = Assert.Single(await second.GetEntriesAsync(start, start.AddHours(2)));
+        Assert.Equal(original.Id, imported.Id);
+        Assert.Equal(original.CreatedUtc, imported.CreatedUtc);
+        Assert.Equal(300, imported.ExcludedSeconds);
+
+        var secondProject = Assert.Single(await second.GetProjectsAsync());
+        await second.AddManualEntryAsync(
+            secondProject.Id,
+            null,
+            "Offline addition",
+            start.AddHours(2),
+            start.AddHours(3));
+        var offlineChanges = await second.CaptureProfileSyncChangesAsync(Guid.NewGuid(), "Second", seedAll: false);
+        await first.ReconcileProfileSyncChangesAsync(offlineChanges);
+        Assert.Contains(
+            await first.GetEntriesAsync(start, start.AddHours(4)),
+            entry => entry.Description == "Offline addition");
+
+        await first.UpdateTimeEntryAsync(
+            original.Id,
+            project.Id,
+            task.Id,
+            "First edit",
+            start,
+            start.AddHours(1),
+            excludedSeconds: 300);
+        await second.UpdateTimeEntryAsync(
+            original.Id,
+            secondProject.Id,
+            imported.TaskId,
+            "Second edit",
+            start,
+            start.AddHours(1),
+            excludedSeconds: 300);
+        await first.AddExclusionAsync(original.Id, start.AddMinutes(30), start.AddMinutes(32), "First-only break");
+        await second.AddExclusionAsync(original.Id, start.AddMinutes(30), start.AddMinutes(38), "Second-only break");
+        Assert.True(await first.RecordSoftwareUsageAsync(original.Id, firstSoftware.ProcessName));
+        Assert.True(await second.RecordSoftwareUsageAsync(original.Id, secondSoftware.ProcessName));
+        var firstFork = await first.CaptureProfileSyncChangesAsync(firstDevice, "First", seedAll: false);
+        var secondFork = await second.CaptureProfileSyncChangesAsync(Guid.NewGuid(), "Second", seedAll: false);
+        var cloud = initial.Concat(firstFork).Concat(secondFork)
+            .DistinctBy(change => change.RevisionId)
+            .ToArray();
+        await first.ReconcileProfileSyncChangesAsync(cloud);
+        var conflict = Assert.Single(
+            await first.GetProfileSyncConflictsAsync(),
+            item => item.EntityType == "TimeEntries" && item.EntityId == original.Id.ToString("D"));
+        var selectedCloud = Assert.Single(conflict.Heads, head => head.DeviceName == "Second");
+        await first.ResolveProfileSyncConflictAsync(
+            conflict.Id,
+            ProfileSyncResolution.KeepBoth,
+            selectedCloud.RevisionId,
+            firstDevice,
+            "First",
+            start.AddDays(1));
+        var resolvedEntries = await first.GetEntriesAsync(start, start.AddDays(2));
+        Assert.Equal(3, resolvedEntries.Count);
+        var duplicate = Assert.Single(resolvedEntries, entry => entry.Description == "Second edit");
+        Assert.Equal(780, duplicate.ExcludedSeconds);
+        Assert.Contains("Second edit app", duplicate.SoftwareLabels, StringComparison.Ordinal);
+        Assert.DoesNotContain("First edit app", duplicate.SoftwareLabels, StringComparison.Ordinal);
+        Assert.Equal(start.AddDays(1), duplicate.CreatedUtc);
+        Assert.Equal(start.AddDays(1), duplicate.ModifiedUtc);
+    }
+
+    [Fact]
+    public async Task ProfileSyncCoalescesSamePathIdentitiesAndPreservesBothLogs()
+    {
+        var directories = Enumerable.Range(1, 3)
+            .Select(index => Path.Combine(_directory, $"identity-{index}"))
+            .ToArray();
+        await using var first = new SqliteTrackerStore(Path.Combine(directories[0], "TimeTracker.db"), directories[0], TimeZoneInfo.Utc);
+        await using var second = new SqliteTrackerStore(Path.Combine(directories[1], "TimeTracker.db"), directories[1], TimeZoneInfo.Utc);
+        await using var joined = new SqliteTrackerStore(Path.Combine(directories[2], "TimeTracker.db"), directories[2], TimeZoneInfo.Utc);
+        await first.InitializeAsync();
+        await second.InitializeAsync();
+        await joined.InitializeAsync();
+
+        var firstClient = await first.AddClientAsync("Same client", "#112233");
+        var firstProject = await first.AddProjectAsync(firstClient.Id, "Same project", "#223344");
+        var secondClient = await second.AddClientAsync("same CLIENT", "#556677");
+        var secondProject = await second.AddProjectAsync(secondClient.Id, "same PROJECT", "#778899");
+        var start = new DateTimeOffset(2026, 8, 21, 8, 0, 0, TimeSpan.Zero);
+        await first.AddManualEntryAsync(firstProject.Id, null, "First log", start, start.AddHours(1));
+        await second.AddManualEntryAsync(secondProject.Id, null, "Second log", start.AddHours(1), start.AddHours(2));
+
+        var cloud = (await first.CaptureProfileSyncChangesAsync(Guid.NewGuid(), "First", seedAll: true))
+            .Concat(await second.CaptureProfileSyncChangesAsync(Guid.NewGuid(), "Second", seedAll: true))
+            .ToArray();
+        await joined.ReconcileProfileSyncChangesAsync(cloud);
+
+        Assert.Single(await joined.GetClientsAsync());
+        Assert.Single(await joined.GetProjectsAsync());
+        var entries = await joined.GetEntriesAsync(start, start.AddHours(3));
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, entry => entry.Description == "First log");
+        Assert.Contains(entries, entry => entry.Description == "Second log");
+    }
+
+    [Fact]
+    public async Task ProfileSyncRoundTripsSharedProfileDataAndKeepsOperationalStateLocal()
+    {
+        var sourceDirectory = Path.Combine(_directory, "roundtrip-source");
+        var targetDirectory = Path.Combine(_directory, "roundtrip-target");
+        await using var source = new SqliteTrackerStore(Path.Combine(sourceDirectory, "TimeTracker.db"), sourceDirectory, TimeZoneInfo.Utc);
+        await using var target = new SqliteTrackerStore(Path.Combine(targetDirectory, "TimeTracker.db"), targetDirectory, TimeZoneInfo.Utc);
+        await source.InitializeAsync();
+        await target.InitializeAsync();
+
+        var client = await source.AddClientAsync("Roundtrip client", "#102030");
+        var project = await source.AddProjectAsync(client.Id, "Roundtrip project", "#405060");
+        await source.UpdateProjectSettingsAsync(project.Id, 7.5, 37.5, 150, 225m, "EUR", true);
+        var task = await source.AddTaskAsync(project.Id, "Roundtrip task");
+        var tag = await source.AddTagAsync("roundtrip", "#708090", project.Id);
+        var software = await source.AddSoftwareAsync("roundtrip.exe", "Roundtrip app", project.Id, false, [tag.Id]);
+        _ = await source.AddRuleAsync(project.Id, "Roundtrip title", "roundtrip.exe");
+        _ = await source.AddCustomTargetAsync(
+            "Roundtrip target",
+            project.Id,
+            CustomTargetCadence.Weekly,
+            12.5,
+            TargetDurationMetric.IncludingShortIdle);
+        var mapping = new TrelloBoardMapping(
+            Guid.NewGuid(),
+            project.Id,
+            "board-roundtrip",
+            "Roundtrip board",
+            [new TrelloListMapping("list-roundtrip", "Doing")]);
+        await source.UpsertTrelloBoardMappingAsync(mapping);
+        await source.SaveTrelloConnectionAsync(new TrelloConnection("member", "person", "Person"));
+        await source.SetSettingAsync("history.view.columns.v1", "shared-layout");
+        await source.SetSettingAsync("recognition.enabled", "false");
+        await source.SetSettingAsync(GoogleSheetsSettings.ConnectionKey, "must-not-sync");
+        await source.SetSettingAsync(SessionTrackingSettings.ResumeMarkerKey, "must-not-sync");
+        await source.SetSettingAsync(SessionTrackingSettings.ReviewEntryKey, Guid.NewGuid().ToString("D"));
+        var start = new DateTimeOffset(2026, 8, 22, 8, 0, 0, TimeSpan.Zero);
+        await source.AddManualEntryAsync(project.Id, task.Id, "#roundtrip Exact log", start, start.AddHours(2), isPaid: true, isCall: true);
+        var sourceEntry = Assert.Single(await source.GetEntriesAsync(start, start.AddHours(3)));
+        await source.AddExclusionsAsync(
+            sourceEntry.Id,
+            [
+                new TimeExclusionPeriod(start.AddMinutes(15), start.AddMinutes(20), "Coffee"),
+                new TimeExclusionPeriod(start.AddMinutes(50), start.AddHours(1), "Away"),
+            ]);
+        Assert.True(await source.RecordSoftwareUsageAsync(sourceEntry.Id, software.ProcessName));
+
+        var changes = await source.CaptureProfileSyncChangesAsync(Guid.NewGuid(), "Source", seedAll: true);
+        await target.ReconcileProfileSyncChangesAsync(changes);
+
+        Assert.Equal("Roundtrip client", Assert.Single(await target.GetClientsAsync()).Name);
+        var targetProject = Assert.Single(await target.GetProjectsAsync());
+        Assert.Equal(225m, targetProject.HourlyRate);
+        Assert.Equal("EUR", targetProject.Currency);
+        Assert.Single(await target.GetTasksAsync());
+        Assert.Single(await target.GetTagsAsync());
+        Assert.Single(await target.GetSoftwareAsync());
+        Assert.Contains(await target.GetRulesAsync(), rule => rule.TitlePattern == "Roundtrip title");
+        Assert.Contains(await target.GetCustomTargetsAsync(), item => item.Name == "Roundtrip target");
+        Assert.Single(await target.GetTrelloBoardMappingsAsync());
+        var targetEntry = Assert.Single(await target.GetEntriesAsync(start, start.AddHours(3)));
+        Assert.Equal(sourceEntry.Id, targetEntry.Id);
+        Assert.Equal(900, targetEntry.ExcludedSeconds);
+        Assert.Contains("Roundtrip app", targetEntry.SoftwareLabels, StringComparison.Ordinal);
+        Assert.True(targetEntry.IsPaid);
+        Assert.True(targetEntry.IsCall);
+        Assert.Equal("shared-layout", await target.GetSettingAsync("history.view.columns.v1"));
+        Assert.Equal("false", await target.GetSettingAsync("recognition.enabled"));
+        Assert.Null(await target.GetSettingAsync(GoogleSheetsSettings.ConnectionKey));
+        Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ResumeMarkerKey));
+        Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ReviewEntryKey));
+        Assert.Null(await target.GetTrelloConnectionAsync());
+    }
+
+    [Fact]
+    public async Task ProfileSyncDefersRunningEntryAndPublishesItsExactAssociationsAfterStop()
+    {
+        var directory = Path.Combine(_directory, "running-sync");
+        await using var store = new SqliteTrackerStore(Path.Combine(directory, "TimeTracker.db"), directory, TimeZoneInfo.Utc);
+        await store.InitializeAsync();
+        var client = await store.AddClientAsync("Running client", "#112233");
+        var project = await store.AddProjectAsync(client.Id, "Running project", "#223344");
+        var software = await store.AddSoftwareAsync("running.exe", "Running app", project.Id, false, []);
+        var started = new DateTimeOffset(2026, 8, 24, 8, 0, 0, TimeSpan.Zero);
+        var running = await store.StartTimerAsync(project.Id, TrackingSource.Manual, started);
+        await store.AddExclusionAsync(running.Id, started.AddMinutes(10), started.AddMinutes(15), "Away");
+        Assert.True(await store.RecordSoftwareUsageAsync(running.Id, software.ProcessName));
+        var beforeCheckpoint = (await store.GetTimeEntryAsync(running.Id))!;
+        await store.CheckpointRunningTimerAsync(started.AddMinutes(30));
+        var afterCheckpoint = (await store.GetTimeEntryAsync(running.Id))!;
+        Assert.Equal(beforeCheckpoint.CreatedUtc, afterCheckpoint.CreatedUtc);
+        Assert.Equal(beforeCheckpoint.ModifiedUtc, afterCheckpoint.ModifiedUtc);
+
+        var deviceId = Guid.NewGuid();
+        var whileRunning = await store.CaptureProfileSyncChangesAsync(deviceId, "Laptop", seedAll: true);
+        Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeEntries" && change.EntityId == running.Id.ToString("D"));
+        Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeEntrySoftware");
+        Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeExclusions");
+        await store.AcknowledgeProfileSyncChangesAsync(whileRunning.Select(change => change.RevisionId).ToArray());
+
+        _ = await store.StopRunningTimerAsync(started.AddHours(1));
+        var completed = await store.CaptureProfileSyncChangesAsync(deviceId, "Laptop", seedAll: false);
+        var entryChange = Assert.Single(
+            completed,
+            change => change.EntityType == "TimeEntries" && change.EntityId == running.Id.ToString("D"));
+        using (var payload = JsonDocument.Parse(entryChange.PayloadJson!))
+        {
+            Assert.Single(payload.RootElement.GetProperty("__Exclusions").EnumerateArray());
+            Assert.Equal(
+                software.Id.ToString("D"),
+                Assert.Single(payload.RootElement.GetProperty("__SoftwareIds").EnumerateArray()).GetString(),
+                ignoreCase: true);
+        }
+        Assert.Contains(completed, change => change.EntityType == "TimeEntrySoftware");
+        Assert.Contains(completed, change => change.EntityType == "TimeExclusions");
+    }
+
+    [Fact]
+    public async Task VersionTwentySixUpgradeCreatesSyncSchemaAndBackupWithoutLosingData()
+    {
+        var directory = Path.Combine(_directory, "schema-27-upgrade");
+        var database = Path.Combine(directory, "TimeTracker.db");
+        await using (var oldStore = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc))
+        {
+            await oldStore.InitializeAsync();
+            _ = await oldStore.AddClientAsync("Before sync upgrade", "#112233");
+        }
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString()))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DROP TABLE ProfileSyncAliases;
+                DROP TABLE ProfileSyncConflicts;
+                DROP TABLE ProfileSyncOutbox;
+                DROP TABLE ProfileSyncEntityState;
+                DROP TABLE ProfileSyncDirtyTables;
+                DROP TABLE ProfileSyncMetadata;
+                DROP TABLE ProfileSyncRuntime;
+                PRAGMA user_version = 26;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await using var upgraded = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc);
+        await upgraded.InitializeAsync();
+        Assert.Equal("Before sync upgrade", Assert.Single(await upgraded.GetClientsAsync()).Name);
+        Assert.NotEmpty(Directory.GetFiles(directory, "TimeTracker.db.backup-v26-*"));
+        await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+        await verify.OpenAsync();
+        await using var verifyCommand = verify.CreateCommand();
+        verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'ProfileSync%';";
+        Assert.Equal(7L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        verifyCommand.CommandText = "PRAGMA user_version;";
+        Assert.Equal(27L, (long)(await verifyCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -3097,7 +3659,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await versionConnection.OpenAsync();
         await using var versionCommand = versionConnection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(24L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(27L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     private static TrelloCard CreateTrelloCard(
@@ -3162,6 +3724,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         public const string RemoteOnlyEntryId = "11111111-1111-1111-1111-111111111111";
         public HashSet<string> Worksheets { get; } = ["About"];
         public Dictionary<string, IReadOnlyList<IReadOnlyList<object?>>> Written { get; } = [];
+        public Dictionary<string, List<IReadOnlyList<object?>>> TechnicalRows { get; } = [];
         public int CreateCalls { get; private set; }
         public int AddBatchCalls { get; private set; }
         public int ReadBatchCalls { get; private set; }
@@ -3210,6 +3773,10 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
             IReadOnlyList<string> worksheetNames,
             CancellationToken cancellationToken = default)
         {
+            if (worksheetNames.Count == 0)
+            {
+                return Task.CompletedTask;
+            }
             AddBatchCalls++;
             Worksheets.UnionWith(worksheetNames);
             return Task.CompletedTask;
@@ -3233,6 +3800,96 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
             }
 
             return Task.CompletedTask;
+        }
+
+        public Task AddHiddenWorksheetsAsync(
+            string accessToken,
+            string spreadsheetId,
+            IReadOnlyList<string> worksheetNames,
+            CancellationToken cancellationToken = default)
+        {
+            Worksheets.UnionWith(worksheetNames);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<IReadOnlyList<string>>> ReadRangeAsync(
+            string accessToken,
+            string spreadsheetId,
+            string range,
+            CancellationToken cancellationToken = default)
+        {
+            var sheet = RangeSheet(range);
+            var startRow = RangeStartRow(range);
+            var rows = TechnicalRows.TryGetValue(sheet, out var stored)
+                ? stored.Skip(Math.Max(0, startRow - 1))
+                    .Select(row => (IReadOnlyList<string>)row.Select(value => value?.ToString() ?? string.Empty).ToArray())
+                    .ToArray()
+                : [];
+            return Task.FromResult<IReadOnlyList<IReadOnlyList<string>>>(rows);
+        }
+
+        public Task AppendRowsAsync(
+            string accessToken,
+            string spreadsheetId,
+            string range,
+            IReadOnlyList<IReadOnlyList<object?>> rows,
+            CancellationToken cancellationToken = default)
+        {
+            var sheet = RangeSheet(range);
+            if (!TechnicalRows.TryGetValue(sheet, out var stored))
+            {
+                stored = [];
+                TechnicalRows[sheet] = stored;
+            }
+            stored.AddRange(rows);
+            return Task.CompletedTask;
+        }
+
+        public Task WriteRangeAsync(
+            string accessToken,
+            string spreadsheetId,
+            string range,
+            IReadOnlyList<IReadOnlyList<object?>> rows,
+            CancellationToken cancellationToken = default)
+        {
+            var sheet = RangeSheet(range);
+            var startRow = RangeStartRow(range);
+            if (!TechnicalRows.TryGetValue(sheet, out var stored))
+            {
+                stored = [];
+                TechnicalRows[sheet] = stored;
+            }
+            while (stored.Count < startRow - 1)
+            {
+                stored.Add([]);
+            }
+            for (var index = 0; index < rows.Count; index++)
+            {
+                var target = startRow - 1 + index;
+                if (target < stored.Count)
+                {
+                    stored[target] = rows[index];
+                }
+                else
+                {
+                    stored.Add(rows[index]);
+                }
+            }
+            return Task.CompletedTask;
+        }
+
+        private static string RangeSheet(string range)
+        {
+            var separator = range.IndexOf('!');
+            return range[..separator].Trim('\'').Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        private static int RangeStartRow(string range)
+        {
+            var separator = range.IndexOf('!');
+            var cells = range[(separator + 1)..];
+            var digits = new string(cells.SkipWhile(character => !char.IsDigit(character)).TakeWhile(char.IsDigit).ToArray());
+            return int.TryParse(digits, out var row) ? row : 1;
         }
     }
 

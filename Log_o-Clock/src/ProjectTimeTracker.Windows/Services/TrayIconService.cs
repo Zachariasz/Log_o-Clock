@@ -13,6 +13,7 @@ public sealed class TrayIconService : IDisposable
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _startTimerItem;
     private readonly ToolStripMenuItem _stopTimerItem;
+    private readonly ToolStripMenuItem _remoteTimersItem;
     private readonly System.Windows.Forms.Timer _singleClickTimer;
     private readonly Action _singleClick;
     private readonly Action _open;
@@ -59,6 +60,12 @@ public sealed class TrayIconService : IDisposable
             Enabled = false,
         };
         _menu.Items.Add(_stopTimerItem);
+        _remoteTimersItem = new ToolStripMenuItem("Other computers")
+        {
+            Enabled = false,
+            Visible = false,
+        };
+        _menu.Items.Add(_remoteTimersItem);
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("Exit", null, (_, _) => exit());
         SetProjects([]);
@@ -119,6 +126,31 @@ public sealed class TrayIconService : IDisposable
             _startTimerItem.DropDownItems.Add(new ToolStripMenuItem("No projects available")
             {
                 Enabled = false,
+            });
+        }
+    }
+
+    public void SetRemoteTimers(IReadOnlyList<RemoteTimerStatus> timers)
+    {
+        foreach (var item in _remoteTimersItem.DropDownItems.Cast<ToolStripItem>().ToArray())
+        {
+            item.Dispose();
+        }
+        _remoteTimersItem.DropDownItems.Clear();
+        _remoteTimersItem.Visible = timers.Count > 0;
+        _remoteTimersItem.Enabled = timers.Count > 0;
+        foreach (var timer in timers)
+        {
+            var work = string.Join(
+                " · ",
+                new[] { timer.TaskName, timer.ProjectName }
+                    .Where(value => !string.IsNullOrWhiteSpace(value)));
+            var started = timer.StartedUtc?.ToLocalTime().ToString("t") ?? "unknown";
+            _remoteTimersItem.DropDownItems.Add(new ToolStripMenuItem(
+                $"{timer.DeviceName}: {(string.IsNullOrWhiteSpace(work) ? "tracking" : work)} since {started}")
+            {
+                Enabled = false,
+                ToolTipText = "Read-only timer status from another synchronized computer",
             });
         }
     }

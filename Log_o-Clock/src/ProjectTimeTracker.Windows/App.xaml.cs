@@ -956,11 +956,13 @@ public partial class App : System.Windows.Application
                      string.Equals(smokeView, "BulkEditProjects", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "Reports", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "ReportTaskHistory", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(smokeView, "Settings", StringComparison.OrdinalIgnoreCase)) &&
+                     string.Equals(smokeView, "Settings", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(smokeView, "SettingsIntegrations", StringComparison.OrdinalIgnoreCase)) &&
                     _mainWindow.FindName("MainTabs") is TabControl mainTabs &&
                     _mainWindow.FindName("ManagementTabs") is TabControl managementTabs)
                 {
-                    mainTabs.SelectedIndex = string.Equals(smokeView, "Settings", StringComparison.OrdinalIgnoreCase)
+                    mainTabs.SelectedIndex = string.Equals(smokeView, "Settings", StringComparison.OrdinalIgnoreCase) ||
+                                             string.Equals(smokeView, "SettingsIntegrations", StringComparison.OrdinalIgnoreCase)
                         ? 3
                         : string.Equals(smokeView, "Reports", StringComparison.OrdinalIgnoreCase) ||
                           string.Equals(smokeView, "ReportTaskHistory", StringComparison.OrdinalIgnoreCase)
@@ -982,6 +984,12 @@ public partial class App : System.Windows.Application
                                     ? 6
                                     : 0;
                     _mainWindow.UpdateLayout();
+                    if (string.Equals(smokeView, "SettingsIntegrations", StringComparison.OrdinalIgnoreCase) &&
+                        _mainWindow.FindName("SettingsCategoryTabs") is TabControl settingsTabs)
+                    {
+                        settingsTabs.SelectedIndex = 3;
+                        _mainWindow.UpdateLayout();
+                    }
                     if (string.Equals(smokeView, "ClientsExpanded", StringComparison.OrdinalIgnoreCase) &&
                         _mainWindow.FindName("ClientsGrid") is ListBox clientsGrid &&
                         FindVisualDescendant<Expander>(clientsGrid) is { } firstClient)
@@ -1204,6 +1212,14 @@ public partial class App : System.Windows.Application
                 }
 
                 if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_PROJECT_FREEZE"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    _mainWindow.VerifyProjectFreezeContextMenuForPreview();
+                }
+
+                if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_SETTINGS_CATEGORIES"),
                         "true",
                         StringComparison.OrdinalIgnoreCase))
@@ -1396,10 +1412,10 @@ public partial class App : System.Windows.Application
                         now.AddMinutes(-7),
                         now.AddMinutes(-1),
                         remove: true);
-                    if (_controller.BreakReminderStreakSecondsForPreview is < 240 or > 241)
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 0 or > 1)
                     {
                         throw new InvalidOperationException(
-                            "Break reminders counted excluded idle time.");
+                            "An idle review did not reset the break reminder streak.");
                     }
 
                     var switched = await _controller.ContinueTimerAsync(
@@ -1409,10 +1425,10 @@ public partial class App : System.Windows.Application
                     await _controller.UpdateRunningStartAsync(
                         switched.Id,
                         _controller.UtcNow.AddMinutes(-2));
-                    if (_controller.BreakReminderStreakSecondsForPreview is < 360 or > 361)
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 120 or > 121)
                     {
                         throw new InvalidOperationException(
-                            "Break reminders did not retain the streak across a project switch.");
+                            "Break reminders did not restart correctly after an idle review.");
                     }
 
                     var ripped = await _controller.RipRunningEntryAsync(
@@ -1423,10 +1439,10 @@ public partial class App : System.Windows.Application
                     await _controller.UpdateRunningStartAsync(
                         ripped.Id,
                         _controller.UtcNow.AddMinutes(-2));
-                    if (_controller.BreakReminderStreakSecondsForPreview is < 480 or > 481)
+                    if (_controller.BreakReminderStreakSecondsForPreview is < 240 or > 241)
                     {
                         throw new InvalidOperationException(
-                            "Break reminders did not retain the streak across a rip.");
+                            "Break reminders did not retain the restarted streak across a rip.");
                     }
 
                     await _controller.StopTimerAsync();
@@ -2046,7 +2062,8 @@ public partial class App : System.Windows.Application
                         result.Description,
                         result.StartUtc,
                         result.EndUtc,
-                        result.IsPaid);
+                        result.IsPaid,
+                        result.IsCall);
                     var storedEntry = (await _store.GetEntriesAsync(
                             result.StartUtc.AddMinutes(-1),
                             result.EndUtc.AddMinutes(1)))
@@ -3113,7 +3130,8 @@ public partial class App : System.Windows.Application
                         result.StartUtc,
                         result.EndUtc,
                         result.IsPaid,
-                        result.ExcludedSeconds);
+                        result.ExcludedSeconds,
+                        isCall: result.IsCall);
                     var updated = (await _store.GetEntriesAsync(start.AddMinutes(-1), end.AddMinutes(1)))
                         .Single(item => item.Id == entry.Id);
                     if (updated.ExcludedSeconds != 1_800 ||
@@ -3676,6 +3694,9 @@ public partial class App : System.Windows.Application
                         TrackingSource.Manual,
                         showDetails: false,
                         initialTaskId: task.Id);
+                    await _controller.UpdateRunningStartAsync(
+                        runningEntry.Id,
+                        accumulatedNow.AddMinutes(-10));
 
                     var firstIdleStart = firstEntryStart.AddMinutes(10);
                     await _controller.AddIdleIntervalForPreviewAsync(
@@ -3699,11 +3720,12 @@ public partial class App : System.Windows.Application
                     if (_controller.AccumulatedAwayPromptCountForPreview != 1 ||
                         _controller.PendingAccumulatedAwaySecondsForPreview != 300 ||
                         _controller.AccumulatedAwayNextPromptMultiplierForPreview != 3 ||
+                        _controller.BreakReminderStreakSecondsForPreview is < 0 or > 1 ||
                         await _store.GetEntryExcludedSecondsAsync(firstEntry.Id) != 0 ||
                         await _store.GetEntryExcludedSecondsAsync(secondEntry.Id) != 0)
                     {
                         throw new InvalidOperationException(
-                            "Declining the first short-idle review did not retain its cross-entry rolling total or skip to 3x.");
+                            "Declining the first short-idle review did not retain its cross-entry rolling total, reset the break reminder streak, or skip to 3x.");
                     }
 
                     var persistedState = await _store.GetSettingAsync(
@@ -4212,6 +4234,48 @@ public partial class App : System.Windows.Application
                         };
                         dialog.Show();
                         await Task.Delay(150);
+                        dialog.UpdateLayout();
+                        SaveWindowPreview(dialog, screenshotPath);
+                        dialog.Close();
+                    }
+                    else if (string.Equals(smokeView, "GoogleSheetsConnection", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var dialog = new GoogleSheetsConnectionWindow(_googleSheetsSync)
+                        {
+                            Owner = _mainWindow,
+                        };
+                        dialog.Show();
+                        await Task.Delay(150);
+                        dialog.UpdateLayout();
+                        SaveWindowPreview(dialog, screenshotPath);
+                        dialog.Close();
+                    }
+                    else if (string.Equals(smokeView, "SyncConflicts", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await _store.RegisterLegacyProfileSyncCandidatesAsync(
+                        [
+                            new LegacyProfileSyncCandidate(
+                                "smoke-legacy-entry",
+                                "2026-08-01",
+                                ["legacy", "2026-08-01", "malformed"],
+                                null,
+                                null,
+                                null,
+                                "Preview client",
+                                "Preview project",
+                                null,
+                                "Legacy row requiring review",
+                                false,
+                                false,
+                                TrackingSource.Manual,
+                                "the row is missing a completed end time"),
+                        ]);
+                        var dialog = new SyncConflictReviewWindow(_googleSheetsSync)
+                        {
+                            Owner = _mainWindow,
+                        };
+                        dialog.Show();
+                        await Task.Delay(200);
                         dialog.UpdateLayout();
                         SaveWindowPreview(dialog, screenshotPath);
                         dialog.Close();
@@ -4923,7 +4987,7 @@ public partial class App : System.Windows.Application
         _ = sender;
         if (entry is not null)
         {
-            _detailsWindow?.UpdateRunningStartForExternalChange(entry);
+            _detailsWindow?.UpdateRunningEntryForExternalChange(entry);
         }
 
         if (entry is null &&
@@ -5003,9 +5067,18 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        var remoteTimers = _googleSheetsSync?.RemoteTimers ?? [];
+        _tray.SetRemoteTimers(remoteTimers);
         if (_controller.RunningEntry is null)
         {
-            _tray.Update(false, "Log O'clock — idle");
+            if (remoteTimers.Count == 0)
+            {
+                _tray.Update(false, "Log O'clock - idle");
+                return;
+            }
+            var remote = remoteTimers[0];
+            var remoteWork = remote.TaskName ?? remote.ProjectName ?? "tracking";
+            _tray.Update(false, $"{remote.DeviceName} - {remoteWork}");
             return;
         }
 

@@ -1,17 +1,36 @@
-LOG O'CLOCK 1.142.3
+LOG O'CLOCK 1.142.4
 Created by Zachariasz Jędrzejczyk
 
 Recommended installation
 ------------------------
 Exit any currently running Project Time Tracker or Log O'clock tray app, then run
-installer\LogOClock-Setup-1.142.3.msi and approve the Windows
+installer\LogOClock-Setup-1.142.4.msi and approve the Windows
 administrator prompt. The installer adds Log O'clock to Program Files
 and creates a Start menu shortcut.
 
 Portable launch
 ---------------
-LogOClock-1.142.3-win-x64\LogOClock.exe is the same self-contained
+LogOClock-1.142.4-win-x64\LogOClock.exe is the same self-contained
 application without the installer. It does not require a separate .NET runtime.
+
+Two-way whole-profile Google Sheets synchronization
+---------------------------------------------------
+Settings > Google Sheets supports two-way whole-profile synchronization across
+devices using a hidden cloud revision journal. Completed entries, clients, projects,
+tasks, tags, software, window rules, targets, debt adjustments, and settings are
+safely synchronized. Remote running timers are displayed with device presence,
+conflicts offer explicit review, and local tracking remains completely resilient
+offline.
+
+Calls duration column in Reports
+--------------------------------
+Reports includes a dedicated Calls column reporting tracked time spent in entries
+explicitly marked as calls, neatly grouped with their projects and tasks.
+
+Reversible project freezing
+---------------------------
+Projects can now be frozen from the Projects context menu to temporarily pause
+active tracking or chooser visibility while preserving all history and targets.
 Automatic and manual update checks
 -----------------------------------
 Settings includes an Updates tab to configure automatic update checking against

@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         new("Task", 220),
         new("Time", 82),
         new("Time + idle", 96),
+        new("Calls", 82),
         new("Value", 112),
         new("Logs", 72),
     ];
@@ -90,6 +91,7 @@ public partial class MainWindow : Window
     private ListCollectionView? _timerTaskSearchView;
     private string _timerTaskSearchText = string.Empty;
     private bool _updatingTimerTaskSearch;
+    private bool _updatingTimerCall;
     private bool _settingTimerStartTimeText;
     private bool _timerStartTimeDirty;
     private int _timerProjectChangeVersion;
@@ -103,11 +105,15 @@ public partial class MainWindow : Window
     private IReadOnlyList<TagDefinition> _tagDefinitions = [];
     private IReadOnlyList<TimeEntryRow> _historyRows = [];
     private IReadOnlyList<TaskRow> _taskRows = [];
+    private IReadOnlyList<TaskRow> _frozenTaskRows = [];
     private IReadOnlyList<TrelloMappingRow> _trelloMappingRows = [];
     private IReadOnlyList<RuleRow> _ruleRows = [];
+    private IReadOnlyList<RuleRow> _frozenRuleRows = [];
     private IReadOnlyList<SoftwareRow> _softwareRows = [];
+    private IReadOnlyList<SoftwareRow> _frozenSoftwareRows = [];
     private IReadOnlyList<CustomTargetRow> _customTargetRows = [];
     private IReadOnlyList<ITargetManagementRow> _targetManagementRows = [];
+    private IReadOnlyList<ITargetManagementRow> _frozenTargetManagementRows = [];
     private IReadOnlyList<ProjectTargetRow> _allTargetRows = [];
     private IReadOnlyList<ProjectTargetRow> _sidebarTargetRows = [];
     private Guid? _reportTargetProjectId;
@@ -855,7 +861,7 @@ public partial class MainWindow : Window
     {
         var requiredControls = new FrameworkElement[]
         {
-            TimerTaskCombo, TimerProjectCombo, TimerDescriptionText,
+            TimerTaskCombo, TimerProjectCombo, TimerDescriptionText, TimerCallCheck,
             TimerStartTimePanel, TimerStartTimeText, ElapsedText, StartStopButton,
             MinimizeWindowButton, MaximizeWindowButton, CloseWindowButton,
             HistoryRangePicker, HistoryProjectCombo, HistoryTaskCombo, HistoryTagCombo,
@@ -1174,48 +1180,66 @@ public partial class MainWindow : Window
 
         VerifyRowOrEmptyMenu(ClientsGrid.ContextMenu, "ClientOnly", "Clients");
         VerifyRowOrEmptyMenu(ProjectsGrid.ContextMenu, "ProjectOnly", "Projects");
+        VerifyProjectFreezeContextMenuForPreview();
         VerifyRowOrEmptyMenu(CustomTargetsGrid.ContextMenu, "CustomTargetOnly", "Targets");
         VerifyTargetContextMenuLabelsForPreview();
         VerifyRowOrEmptyMenu(TasksGrid.ContextMenu, "TaskOnly", "Tasks");
         VerifyRowOrEmptyMenu(SoftwareGrid.ContextMenu, "SoftwareOnly", "Software");
         VerifyRowOrEmptyMenu(RulesGrid.ContextMenu, "RuleOnly", "Window rules");
 
-        foreach (var list in new FrameworkElement[] { ClientsGrid, ProjectsGrid, TagsGrid })
+        if (ClientsGrid.Parent is not Grid { Children.Count: 1 })
         {
-            if (list.Parent is not Grid { Children.Count: 1 })
-            {
-                throw new InvalidOperationException($"{list.Name} still has controls below or beside its object list.");
-            }
+            throw new InvalidOperationException("Clients still has controls below or beside its object list.");
+        }
+
+        if (TagsGrid.Parent is not Grid tagsHost ||
+            tagsHost.Children.Count != 2 ||
+            Grid.GetRow(TagsGrid) != 0 ||
+            Grid.GetRow(FreezedTagsExpander) != 1)
+        {
+            throw new InvalidOperationException("Tags is missing its folded frozen-project section.");
+        }
+
+        if (ProjectsGrid.Parent is not Grid projectHost ||
+            projectHost.Children.Count != 2 ||
+            Grid.GetRow(ProjectsGrid) != 0 ||
+            Grid.GetRow(FreezedProjectsExpander) != 1)
+        {
+            throw new InvalidOperationException("Projects is missing its folded frozen-project section.");
         }
 
         if (TasksGrid.Parent is not Grid taskHost ||
-            taskHost.Children.Count != 2 ||
+            taskHost.Children.Count != 3 ||
             Grid.GetRow(TaskProjectCombo.Parent as UIElement ?? TaskProjectCombo) != 0 ||
-            Grid.GetRow(TasksGrid) != 1)
+            Grid.GetRow(TasksGrid) != 1 ||
+            Grid.GetRow(FreezedTasksExpander) != 2)
         {
             throw new InvalidOperationException("Tasks is missing its project filter above the object list.");
         }
 
         if (CustomTargetsGrid.Parent is not Grid targetHost ||
-            targetHost.Children.Count != 2 ||
+            targetHost.Children.Count != 3 ||
             Grid.GetRow(TargetProjectCombo.Parent as UIElement ?? TargetProjectCombo) != 0 ||
-            Grid.GetRow(CustomTargetsGrid) != 1)
+            Grid.GetRow(CustomTargetsGrid) != 1 ||
+            Grid.GetRow(FreezedTargetsExpander) != 2)
         {
             throw new InvalidOperationException("Targets is missing its project filter above the object list.");
         }
 
         if (SoftwareGrid.Parent is not Grid softwareHost ||
-            softwareHost.Children.Count != 2 ||
+            softwareHost.Children.Count != 3 ||
             Grid.GetRow(SoftwareProjectCombo.Parent as UIElement ?? SoftwareProjectCombo) != 0 ||
-            Grid.GetRow(SoftwareGrid) != 1)
+            Grid.GetRow(SoftwareGrid) != 1 ||
+            Grid.GetRow(FreezedSoftwareExpander) != 2)
         {
             throw new InvalidOperationException("Software is missing its project filter above the object list.");
         }
 
         if (RulesGrid.Parent is not Grid rulesHost ||
-            rulesHost.Children.Count != 2 ||
+            rulesHost.Children.Count != 3 ||
             Grid.GetRow(RuleProjectCombo.Parent as UIElement ?? RuleProjectCombo) != 0 ||
-            Grid.GetRow(RulesGrid) != 1)
+            Grid.GetRow(RulesGrid) != 1 ||
+            Grid.GetRow(FreezedRulesExpander) != 2)
         {
             throw new InvalidOperationException("Window rules are missing their project filter above the grouped list.");
         }
@@ -1673,6 +1697,9 @@ public partial class MainWindow : Window
             .FindResource("ReportColumnHeaderMenu") as ContextMenu;
         if (taskGrids.Length == 0 ||
             footers.Length == 0 ||
+            taskGrids.Any(grid => grid.Columns.All(column =>
+                !string.Equals(column.Header as string, "Calls", StringComparison.Ordinal))) ||
+            footers.Any(footer => footer.ColumnDefinitions.Count != ReportColumnDefinitions.Length) ||
             ReportColumnsButton.Content is not System.Windows.Shapes.Path ||
             ReportColumnsButton.ContextMenu?.Items.Count != 3 ||
             columnsSubmenu?.Items.Count != ReportColumnDefinitions.Length ||
@@ -1695,7 +1722,7 @@ public partial class MainWindow : Window
                 Visibility.Collapsed) ||
             taskGrids.Any(grid => Math.Abs(grid.Columns.Single(column =>
                     string.Equals(column.Header as string, "Time", StringComparison.Ordinal)).Width.Value - 137) > 0.01) ||
-            footers.Any(footer => footer.ColumnDefinitions[3].Width.Value != 0) ||
+            footers.Any(footer => footer.ColumnDefinitions[4].Width.Value != 0) ||
             footers.Any(footer => Math.Abs(footer.ColumnDefinitions[1].Width.Value - 137) > 0.01) ||
             ReportSaveViewButton.Visibility != Visibility.Visible)
         {
@@ -2140,7 +2167,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void RenameProfile_Click(object sender, RoutedEventArgs e)
+    private async void RenameProfile_Click(object sender, RoutedEventArgs e)
     {
         _ = sender;
         _ = e;
@@ -2160,6 +2187,7 @@ public partial class MainWindow : Window
         {
             _activeProfile = _profileCatalog.Rename(_activeProfile.Id, dialog.Value);
             UpdateProfileLabel();
+            await _googleSheetsSync.SetProfileNameAsync(_activeProfile.Name);
         }
         catch (Exception exception)
         {
@@ -2868,13 +2896,17 @@ public partial class MainWindow : Window
             var reportTasks = await _store.GetTasksAsync(includeArchived: true);
             var taskWork = (await _store.GetTaskWorkSummariesAsync(_controller.UtcNow))
                 .ToDictionary(summary => summary.TaskId);
-            var rules = await _store.GetRulesAsync();
+            var rules = await _store.GetRulesAsync(includeFrozen: true);
             var customTargets = await _store.GetCustomTargetsAsync();
             var tagSummaries = await _store.GetTagSummariesAsync();
-            var software = await _store.GetProjectSoftwareAsync();
+            var software = await _store.GetProjectSoftwareAsync(includeFrozen: true);
             var clientNames = clients.ToDictionary(client => client.Id, client => client.Name);
             var projectNames = projects.ToDictionary(project => project.Id, project => project.Name);
             var projectsById = projects.ToDictionary(project => project.Id);
+            var frozenProjectIds = projects
+                .Where(project => project.IsFrozen)
+                .Select(project => project.Id)
+                .ToHashSet();
 
             _activeClients = clients;
             _activeProjects = projects;
@@ -2891,12 +2923,12 @@ public partial class MainWindow : Window
                 .Select(client => new ClientRow(
                     client,
                     projects
-                        .Where(project => project.ClientId == client.Id)
+                        .Where(project => project.ClientId == client.Id && !project.IsFrozen)
                         .OrderBy(project => project.Name, StringComparer.OrdinalIgnoreCase)
                         .Select(project => new ClientProjectRow(project))
                         .ToArray()))
                 .ToArray();
-            ProjectsGrid.ItemsSource = projects
+            var projectRows = projects
                 .Select(project => new ProjectRow(
                     project,
                     clientNames.GetValueOrDefault(project.ClientId, "Archived client"),
@@ -2904,11 +2936,13 @@ public partial class MainWindow : Window
                 .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(row => row.Client, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            ProjectsGrid.ItemsSource = projectRows.Where(row => !row.Project.IsFrozen).ToArray();
+            FrozenProjectsList.ItemsSource = projectRows.Where(row => row.Project.IsFrozen).ToArray();
             _customTargetRows = await BuildCustomTargetRowsAsync(
                 customTargets,
                 projectsById,
                 clientNames);
-            _taskRows = tasks
+            var taskRows = tasks
                 .Select(task =>
                 {
                     var project = projectsById.GetValueOrDefault(task.ProjectId);
@@ -2924,15 +2958,34 @@ public partial class MainWindow : Window
                 .ThenBy(row => row.Project, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(row => row.Client, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            _taskRows = taskRows.Where(row => !frozenProjectIds.Contains(row.Task.ProjectId)).ToArray();
+            _frozenTaskRows = taskRows.Where(row => frozenProjectIds.Contains(row.Task.ProjectId)).ToArray();
+            FrozenTasksList.ItemsSource = _frozenTaskRows;
             UpdateTaskFilterOptions();
             ApplyTaskFilter();
-            TagsGrid.ItemsSource = tagSummaries
+            var tagRows = tagSummaries
                 .Select(summary => new TagRow(summary, _projectOptions))
                 .ToArray();
-            _softwareRows = software.Select(item => new SoftwareRow(item)).ToArray();
+            TagsGrid.ItemsSource = tagRows
+                .Where(row => row.Summary.Tag.IsGlobal ||
+                              row.Summary.Tag.AssignedProjectIds.Any(projectId => !frozenProjectIds.Contains(projectId)))
+                .ToArray();
+            FrozenTagsList.ItemsSource = tagRows
+                .Where(row => !row.Summary.Tag.IsGlobal &&
+                              row.Summary.Tag.AssignedProjectIds.Count > 0 &&
+                              row.Summary.Tag.AssignedProjectIds.All(frozenProjectIds.Contains))
+                .ToArray();
+            var softwareRows = software.Select(item => new SoftwareRow(item)).ToArray();
+            _softwareRows = softwareRows
+                .Where(row => row.IsGlobal || !frozenProjectIds.Contains(row.ProjectId))
+                .ToArray();
+            _frozenSoftwareRows = softwareRows
+                .Where(row => !row.IsGlobal && frozenProjectIds.Contains(row.ProjectId))
+                .ToArray();
+            FrozenSoftwareList.ItemsSource = _frozenSoftwareRows;
             UpdateSoftwareFilterOptions();
             ApplySoftwareFilter();
-            _ruleRows = rules
+            var ruleRows = rules
                 .Select(rule =>
                 {
                     var project = projectsById[rule.ProjectId];
@@ -2945,6 +2998,9 @@ public partial class MainWindow : Window
                 .ThenBy(row => row.Client, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(row => row.TitlePattern, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            _ruleRows = ruleRows.Where(row => !frozenProjectIds.Contains(row.Rule.ProjectId)).ToArray();
+            _frozenRuleRows = ruleRows.Where(row => frozenProjectIds.Contains(row.Rule.ProjectId)).ToArray();
+            FrozenRulesList.ItemsSource = _frozenRuleRows;
             UpdateRuleFilterOptions();
             ApplyRuleFilter();
 
@@ -3022,8 +3078,28 @@ public partial class MainWindow : Window
     private void GoogleSheetsSync_SyncCompleted(object? sender, GoogleSheetsSyncResult result)
     {
         _ = sender;
-        _ = result;
-        _ = Dispatcher.InvokeAsync(RefreshGoogleSheetsAsync);
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            if (!string.IsNullOrWhiteSpace(result.SharedProfileName) &&
+                !string.Equals(_activeProfile.Name, result.SharedProfileName, StringComparison.Ordinal))
+            {
+                try
+                {
+                    _activeProfile = _profileCatalog.Rename(_activeProfile.Id, result.SharedProfileName);
+                    UpdateProfileLabel();
+                }
+                catch (InvalidOperationException)
+                {
+                    // A local profile with that name can coexist; the shared name remains visible in Sheets.
+                }
+            }
+            if (result.DataChanged)
+            {
+                await _controller.ReloadSynchronizedProfileSettingsAsync();
+            }
+            UpdateRemoteTimerStatus();
+            await RefreshGoogleSheetsAsync();
+        });
     }
 
     private void UpdateCheck_StateChanged(object? sender, UpdateCheckState state)
@@ -3136,10 +3212,27 @@ public partial class MainWindow : Window
         GoogleSheetsDisconnectButton.IsEnabled = connected;
         GoogleSheetsCloudExportCheck.IsEnabled = connected;
         GoogleSheetsCloudExportCheck.IsChecked = connection?.StoreExportsInGoogleSheets == true;
+        GoogleSheetsDeviceNameText.IsEnabled = connected;
+        GoogleSheetsTimeZoneCombo.IsEnabled = connected;
+        GoogleSheetsDeviceNameText.Text = connection?.DeviceName ?? Environment.MachineName;
+        if (GoogleSheetsTimeZoneCombo.ItemsSource is null)
+        {
+            GoogleSheetsTimeZoneCombo.ItemsSource = TimeZoneInfo.GetSystemTimeZones();
+        }
+        GoogleSheetsTimeZoneCombo.SelectedValue = connection?.PinnedTimeZoneId ?? TimeZoneInfo.Local.Id;
+        var conflicts = connected
+            ? await _googleSheetsSync.GetConflictsAsync()
+            : [];
+        GoogleSheetsReviewConflictsButton.IsEnabled = conflicts.Count > 0;
+        GoogleSheetsConflictStatusText.Text = conflicts.Count == 0
+            ? "No conflicts need review."
+            : $"{conflicts.Count} conflict{(conflicts.Count == 1 ? string.Empty : "s")} need review; other data keeps synchronizing.";
+        GoogleSheetsConflictStatusText.Foreground = (Brush)FindResource(
+            conflicts.Count == 0 ? "MutedBrush" : "WarningBrush");
         if (connection is null)
         {
             GoogleSheetsConnectionText.Text = "Not connected";
-            GoogleSheetsSyncStatusText.Text = "Daily CSV exports are stored locally.";
+            GoogleSheetsSyncStatusText.Text = "This profile currently stays on this computer.";
             GoogleSheetsSyncStatusText.Foreground = (Brush)FindResource("MutedBrush");
             return;
         }
@@ -3158,12 +3251,12 @@ public partial class MainWindow : Window
         else if (connection.LastSuccessfulSyncUtc is { } lastSync)
         {
             GoogleSheetsSyncStatusText.Text =
-                $"Last synchronized {lastSync.ToLocalTime():g}. One worksheet is kept for each day.";
+                $"Last synchronized {lastSync.ToLocalTime():g}. Local tracking remains available offline.";
             GoogleSheetsSyncStatusText.Foreground = (Brush)FindResource("MutedBrush");
         }
         else
         {
-            GoogleSheetsSyncStatusText.Text = "Connected. Synchronize to create this profile's spreadsheet.";
+            GoogleSheetsSyncStatusText.Text = "Connected. The first background reconciliation is pending.";
             GoogleSheetsSyncStatusText.Foreground = (Brush)FindResource("MutedBrush");
         }
     }
@@ -3195,13 +3288,14 @@ public partial class MainWindow : Window
         _ = sender;
         _ = e;
         GoogleSheetsSyncButton.IsEnabled = false;
-        GoogleSheetsSyncStatusText.Text = "Synchronizing daily worksheetsâ€¦";
+        GoogleSheetsSyncStatusText.Text = "Reconciling the shared profile…";
+        GoogleSheetsSyncStatusText.Text = "Reconciling the shared profile…";
         try
         {
             var result = await _googleSheetsSync.SyncNowAsync();
             await RefreshGoogleSheetsAsync();
             GoogleSheetsSyncStatusText.Text =
-                $"Synchronized {result.EntryCount} entries across {result.WorksheetCount} daily worksheets.";
+                $"Synchronized {result.EntryCount} entries; uploaded {result.UploadedCount}, imported {result.ImportedCount}, conflicts {result.ConflictCount}.";
         }
         catch (Exception exception)
         {
@@ -3267,6 +3361,61 @@ public partial class MainWindow : Window
         {
             _ = Process.Start(new ProcessStartInfo(connection.SpreadsheetUrl) { UseShellExecute = true });
         }
+    }
+
+    private async void GoogleSheetsSaveDeviceName_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        try
+        {
+            await _googleSheetsSync.SetDeviceNameAsync(GoogleSheetsDeviceNameText.Text);
+            await RefreshGoogleSheetsAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not save the computer name", exception);
+        }
+    }
+
+    private async void GoogleSheetsApplyTimeZone_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (GoogleSheetsTimeZoneCombo.SelectedValue is not string timeZoneId)
+        {
+            return;
+        }
+        if (MessageBox.Show(
+                this,
+                "Change the shared daily worksheet time zone? Daily tabs will be rebuilt, but the stored UTC timestamps will not change.",
+                "Change worksheet time zone",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+        {
+            await RefreshGoogleSheetsAsync();
+            return;
+        }
+        try
+        {
+            await _googleSheetsSync.SetPinnedTimeZoneAsync(timeZoneId);
+            _ = await _googleSheetsSync.SyncNowAsync();
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not change the worksheet time zone", exception);
+            await RefreshGoogleSheetsAsync();
+        }
+    }
+
+    private void GoogleSheetsReviewConflicts_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        var dialog = new SyncConflictReviewWindow(_googleSheetsSync) { Owner = this };
+        _ = dialog.ShowDialog();
+        _ = RefreshGoogleSheetsAsync();
     }
 
     private void BuildHistoryColumnsMenu()
@@ -3702,8 +3851,7 @@ public partial class MainWindow : Window
         var expected = ReportColumnDefinitions
             .Select(column => column.Key)
             .ToHashSet(StringComparer.Ordinal);
-        if (view.Columns.Count != expected.Count ||
-            view.Columns.Select(column => column.Key).Distinct(StringComparer.Ordinal).Count() != expected.Count ||
+        if (view.Columns.Select(column => column.Key).Distinct(StringComparer.Ordinal).Count() != view.Columns.Count ||
             view.Columns.Any(column =>
                 !expected.Contains(column.Key) ||
                 !double.IsFinite(column.Width) ||
@@ -3713,17 +3861,15 @@ public partial class MainWindow : Window
             return false;
         }
 
-        _reportView = new ReportViewState(view.Columns
-            .OrderBy(column => Array.FindIndex(
-                ReportColumnDefinitions,
-                definition => string.Equals(definition.Key, column.Key, StringComparison.Ordinal)))
+        var savedByKey = view.Columns.ToDictionary(column => column.Key, StringComparer.Ordinal);
+        _reportView = new ReportViewState(ReportColumnDefinitions
+            .Select(definition => savedByKey.GetValueOrDefault(
+                definition.Key,
+                new ReportColumnState(definition.Key, IsVisible: true, definition.Width)))
             .Select(column => column.Width > 0
                 ? column
-                : column with
-                {
-                    Width = ReportColumnDefinitions.Single(definition =>
-                        string.Equals(definition.Key, column.Key, StringComparison.Ordinal)).Width,
-                })
+                : column with { Width = ReportColumnDefinitions.Single(definition =>
+                    string.Equals(definition.Key, column.Key, StringComparison.Ordinal)).Width })
             .ToArray());
         ApplyReportViewToVisibleElements();
         UpdateReportColumnsMenu();
@@ -4264,6 +4410,45 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void TimerCallCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_loading || _updatingTimerCall || _controller.RunningEntry is null)
+        {
+            return;
+        }
+
+        await _timerActionGate.WaitAsync();
+        try
+        {
+            if (_controller.RunningEntry is not { } runningEntry)
+            {
+                return;
+            }
+
+            var isCall = TimerCallCheck.IsChecked == true;
+            if (runningEntry.IsCall == isCall)
+            {
+                return;
+            }
+
+            await PersistTimerStartAsync();
+            var taskId = await ResolveTimerTaskAsync(runningEntry.ProjectId);
+            await _controller.SaveRunningDetailsAsync(taskId, TimerDescriptionText.Text);
+            await _controller.SetRunningCallTrackingAsync(isCall);
+        }
+        catch (Exception exception)
+        {
+            UpdateTimerUi();
+            ShowError("Could not update call tracking", exception);
+        }
+        finally
+        {
+            _timerActionGate.Release();
+        }
+    }
+
     private async void TimerProjectCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _ = sender;
@@ -4712,6 +4897,16 @@ public partial class MainWindow : Window
         StartStopButton.Content = running is null ? "Start" : "Stop";
         StartStopButton.Style = (Style)FindResource(running is null ? "PrimaryButton" : "RunningTimerButton");
         TimerProjectCombo.IsEnabled = true;
+        _updatingTimerCall = true;
+        try
+        {
+            TimerCallCheck.Visibility = running is null ? Visibility.Collapsed : Visibility.Visible;
+            TimerCallCheck.IsChecked = running?.IsCall == true;
+        }
+        finally
+        {
+            _updatingTimerCall = false;
+        }
         if (running is not null)
         {
             TimerProjectCombo.SelectedValue = running.ProjectId;
@@ -4731,6 +4926,33 @@ public partial class MainWindow : Window
         }
 
         UpdateElapsed();
+        UpdateRemoteTimerStatus();
+    }
+
+    private void UpdateRemoteTimerStatus()
+    {
+        var timers = _googleSheetsSync.RemoteTimers;
+        if (timers.Count == 0)
+        {
+            RemoteTimerStatusText.Text = string.Empty;
+            RemoteTimerStatusText.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var timer = timers[0];
+        var work = string.Join(
+            " · ",
+            new[] { timer.TaskName, timer.ProjectName, timer.ClientName }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
+        if (string.IsNullOrWhiteSpace(work))
+        {
+            work = "an entry";
+        }
+        var started = timer.StartedUtc?.ToLocalTime().ToString("g", CultureInfo.CurrentCulture) ?? "an unknown time";
+        var additional = timers.Count > 1 ? $" (+{timers.Count - 1} more)" : string.Empty;
+        RemoteTimerStatusText.Text = $"{timer.DeviceName} is tracking {work} since {started}{additional}";
+        RemoteTimerStatusText.ToolTip = "Read-only status from another synchronized computer. It is not the local running timer.";
+        RemoteTimerStatusText.Visibility = Visibility.Visible;
     }
 
     private void ClearTimerTaskAfterStop()
@@ -5327,7 +5549,8 @@ public partial class MainWindow : Window
                     result.StartUtc,
                     result.EndUtc,
                     result.IsPaid,
-                    result.ExcludedSeconds);
+                    result.ExcludedSeconds,
+                    isCall: result.IsCall);
                 _controller.NotifyDataChanged();
             }
             catch (Exception exception)
@@ -5535,8 +5758,7 @@ public partial class MainWindow : Window
         }
 
         if (_controller.RunningEntry is { } running &&
-            ProjectsGrid.ItemsSource is IEnumerable<ProjectRow> projects &&
-            projects.Any(project => project.Project.Id == running.ProjectId && project.Project.ClientId == row.Client.Id))
+            _activeProjects.Any(project => project.Id == running.ProjectId && project.ClientId == row.Client.Id))
         {
             MessageBox.Show(this, "Stop the client’s active project timer before removing it.", "Timer is running", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
@@ -5796,6 +6018,68 @@ public partial class MainWindow : Window
         }
 
         await RunCrudAsync(() => _store.ArchiveProjectAsync(row.Project.Id), reloadRecognition: true);
+    }
+
+    private async void FreezeProject_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (ProjectsGrid.SelectedItem is not ProjectRow { Project.IsFrozen: false } row)
+        {
+            return;
+        }
+
+        await RunCrudAsync(
+            () => _store.SetProjectFrozenAsync(row.Project.Id, isFrozen: true),
+            reloadRecognition: true,
+            dismissActiveRecognitionReminder: true);
+    }
+
+    private async void UnfreezeProject_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (ProjectsGrid.SelectedItem is not ProjectRow { Project.IsFrozen: true } row)
+        {
+            return;
+        }
+
+        await RunCrudAsync(
+            () => _store.SetProjectFrozenAsync(row.Project.Id, isFrozen: false),
+            reloadRecognition: true);
+    }
+
+    private void FrozenProjectsList_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not ListBox list || e.OriginalSource is not DependencyObject source)
+        {
+            return;
+        }
+
+        var current = source;
+        while (current is not null && current is not ListBoxItem)
+        {
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        list.SelectedItem = current is ListBoxItem item &&
+                            ReferenceEquals(ItemsControl.ItemsControlFromItemContainer(item), list)
+            ? item.Content
+            : null;
+    }
+
+    private async void UnfreezeFrozenProject_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (FrozenProjectsList.SelectedItem is not ProjectRow { Project.IsFrozen: true } row)
+        {
+            return;
+        }
+
+        await RunCrudAsync(
+            () => _store.SetProjectFrozenAsync(row.Project.Id, isFrozen: false),
+            reloadRecognition: true);
     }
 
     private async void AddCustomTarget_Click(object sender, RoutedEventArgs e)
@@ -7106,14 +7390,17 @@ public partial class MainWindow : Window
             reloadRecognition: true);
     }
 
-    private async Task RunCrudAsync<T>(Func<Task<T>> action, bool reloadRecognition)
+    private async Task RunCrudAsync<T>(
+        Func<Task<T>> action,
+        bool reloadRecognition,
+        bool dismissActiveRecognitionReminder = false)
     {
         try
         {
             await action();
             if (reloadRecognition)
             {
-                await _controller.ReloadRecognitionAsync();
+                await _controller.ReloadRecognitionAsync(dismissActiveRecognitionReminder);
             }
             else
             {
@@ -7126,14 +7413,17 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task RunCrudAsync(Func<Task> action, bool reloadRecognition)
+    private async Task RunCrudAsync(
+        Func<Task> action,
+        bool reloadRecognition,
+        bool dismissActiveRecognitionReminder = false)
     {
         try
         {
             await action();
             if (reloadRecognition)
             {
-                await _controller.ReloadRecognitionAsync();
+                await _controller.ReloadRecognitionAsync(dismissActiveRecognitionReminder);
             }
             else
             {
@@ -7732,6 +8022,7 @@ public partial class MainWindow : Window
                 Project = group.Key.ProjectName,
                 TotalSeconds = group.Sum(row => row.DurationSeconds),
                 TotalWithShortIdleSeconds = group.Sum(row => row.DurationWithShortIdleSeconds),
+                CallSeconds = group.Sum(row => row.CallDurationSeconds),
                 PaidSeconds = group.Sum(row => row.PaidDurationSeconds),
                 UnpaidSeconds = group.Sum(row => row.UnpaidDurationSeconds),
                 EntryCount = group.Sum(row => row.EntryCount),
@@ -7750,7 +8041,8 @@ public partial class MainWindow : Window
                         row.EntryCount,
                         row.HourlyRate,
                         row.Currency,
-                        row.LatestActivityUtc))
+                        row.LatestActivityUtc,
+                        row.CallDurationSeconds))
                     .ToArray(),
             })
             .OrderByDescending(row => row.TotalSeconds)
@@ -7773,7 +8065,8 @@ public partial class MainWindow : Window
                 row.EntryCount,
                 row.Value,
                 totalSeconds == 0 ? 0 : row.TotalSeconds * 100d / totalSeconds,
-                row.Tasks))
+                row.Tasks,
+                row.CallSeconds))
             .ToArray();
     }
 
@@ -7967,12 +8260,25 @@ public partial class MainWindow : Window
         TargetsGrid.ItemsSource = _sidebarTargetRows;
         FloatingTargetsGrid.ItemsSource = _sidebarTargetRows;
 
-        _targetManagementRows = _customTargetRows
+        var frozenProjectIds = _activeProjects
+            .Where(project => project.IsFrozen)
+            .Select(project => project.Id)
+            .ToHashSet();
+        var targetManagementRows = _customTargetRows
             .Cast<ITargetManagementRow>()
             .OrderBy(row => row.Type, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Project, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        _targetManagementRows = targetManagementRows
+            .Where(row => row is not CustomTargetRow target ||
+                          target.Target.ProjectId is not { } projectId ||
+                          !frozenProjectIds.Contains(projectId))
+            .ToArray();
+        _frozenTargetManagementRows = targetManagementRows
+            .Where(row => row is CustomTargetRow { Target.ProjectId: { } projectId } && frozenProjectIds.Contains(projectId))
+            .ToArray();
+        FrozenTargetsList.ItemsSource = _frozenTargetManagementRows;
         UpdateTargetFilterOptions();
         ApplyTargetFilter();
 
@@ -9049,6 +9355,15 @@ public partial class MainWindow : Window
         if (row is not null)
         {
             ProjectsGrid.SelectedItem = row;
+            return row;
+        }
+
+        row = (FrozenProjectsList.ItemsSource as IEnumerable<ProjectRow>)?
+            .FirstOrDefault(item => item.Project.Id == projectId);
+        if (row is not null)
+        {
+            FreezedProjectsExpander.IsExpanded = true;
+            FrozenProjectsList.SelectedItem = row;
         }
 
         return row;
@@ -9188,7 +9503,61 @@ public partial class MainWindow : Window
 
         var selectedCount = GetSelectedRows<ProjectRow>(grid).Length;
         ConfigureRowOrEmptyContextMenu(menu, selectedCount > 0, "ProjectOnly");
+        var selectedProject = selectedCount == 1 ? grid.SelectedItem as ProjectRow : null;
+        ConfigureProjectFreezeContextMenu(menu, selectedProject);
         SetContextMenuActionVisibility(menu, "Rename…", selectedCount == 1);
+    }
+
+    internal void VerifyProjectFreezeContextMenuForPreview()
+    {
+        var menu = ProjectsGrid.ContextMenu
+            ?? throw new InvalidOperationException("Projects does not have a context menu.");
+        var freezeAction = menu.Items.OfType<MenuItem>()
+            .SingleOrDefault(item => string.Equals(item.Header as string, "Freeze project", StringComparison.Ordinal));
+        var unfreezeAction = menu.Items.OfType<MenuItem>()
+            .SingleOrDefault(item => string.Equals(item.Header as string, "Unfreeze project", StringComparison.Ordinal));
+        if (freezeAction?.Tag as string != "ProjectOnly" ||
+            unfreezeAction?.Tag as string != "ProjectOnly")
+        {
+            throw new InvalidOperationException("Projects is missing its freeze context-menu actions.");
+        }
+
+        if (!string.Equals(FreezedProjectsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
+            FrozenProjectsList.Opacity >= 1d ||
+            !string.Equals(FreezedTagsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
+            !string.Equals(FreezedTasksExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
+            !string.Equals(FreezedTargetsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
+            !string.Equals(FreezedSoftwareExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
+            !string.Equals(FreezedRulesExpander.Header as string, "Freezed Projects", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Frozen project sections must be folded and visually muted.");
+        }
+
+        var activeRow = new ProjectRow(
+            new Project(Guid.NewGuid(), Guid.NewGuid(), "Preview project", "#445566"),
+            "Preview client",
+            null);
+        ConfigureProjectFreezeContextMenu(menu, activeRow);
+        if (freezeAction.Visibility != Visibility.Visible ||
+            unfreezeAction.Visibility != Visibility.Collapsed)
+        {
+            throw new InvalidOperationException("An active project does not expose only the Freeze project action.");
+        }
+
+        ConfigureProjectFreezeContextMenu(
+            menu,
+            activeRow with { Project = activeRow.Project with { IsFrozen = true } });
+        if (freezeAction.Visibility != Visibility.Collapsed ||
+            unfreezeAction.Visibility != Visibility.Visible)
+        {
+            throw new InvalidOperationException("A frozen project does not expose only the Unfreeze project action.");
+        }
+    }
+
+    private static void ConfigureProjectFreezeContextMenu(ContextMenu menu, ProjectRow? selectedProject)
+    {
+        SetContextMenuActionVisibility(menu, "Freeze project", selectedProject is { Project.IsFrozen: false });
+        SetContextMenuActionVisibility(menu, "Unfreeze project", selectedProject is { Project.IsFrozen: true });
     }
 
     private void CustomTargetsGrid_ContextMenuOpening(object sender, ContextMenuEventArgs e)

@@ -2,7 +2,7 @@
 
 ## Source-of-truth model
 
-The per-profile SQLite database is authoritative. Everything else is either configuration metadata, a credential, a derived export, or a safety copy.
+Each computer's per-profile SQLite database is its operational source of truth. Google Sheets can be enabled as the shared revision journal used to reconcile those SQLite stores; daily worksheets remain derived readable views.
 
 ```mermaid
 flowchart TD
@@ -10,13 +10,14 @@ flowchart TD
     DB --> Daily["daily CSV files + revisions"]
     DB --> Backup["daily first/latest DB snapshots"]
     DB --> Report["History and Reports queries"]
-    DB --> Sheets["Google daily worksheets"]
+    DB <-->|"revision journal"| Sheets["Google hidden sync worksheets"]
+    DB --> SheetViews["Google daily worksheet views"]
     Trello["Trello assigned cards"] --> Linked["linked SavedTasks in DB"]
     Cred["Windows Credential Manager"] --> Trello
     Cred --> Sheets
 ```
 
-Do not rebuild SQLite from CSV or Google Sheets automatically. There is no implemented restore importer.
+CSV files and visible daily worksheets are never treated as a database. Only validated revisions in the hidden Google synchronization journal can be applied to SQLite, transactionally and without importing a remote running timer.
 
 ## Directory layout
 
@@ -50,7 +51,7 @@ If the root is not overridden, startup can copy the legacy `%LocalAppData%\Proje
 - Connection mode: read/write/create, shared cache, foreign keys enabled.
 - Runtime pragmas: foreign keys on, WAL journal mode, 5-second busy timeout.
 - Timestamps: UTC ISO round-trip text.
-- Current `PRAGMA user_version`: **24**.
+- Current `PRAGMA user_version`: **27**.
 - Upgrade: before an existing older database is changed, a sibling `TimeTracker.db.backup-v<old>-<timestamp>` is created.
 - Initialization also ensures system entities, removes invalid sub-minute completed entries and unused notification-created tasks, synchronizes tag definitions from descriptions, and refreshes derived files.
 
@@ -79,12 +80,13 @@ erDiagram
     SAVED_TASKS o|--o| EXTERNAL_TASK_LINKS : linked
 ```
 
-Additional singleton/operational tables are `TrelloConnections`, `Settings`, and `GoogleSheetsEntryDeletions`.
+Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-27 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
 
 ## Important constraints
 
 - Client names are case-insensitively unique.
 - Project names are unique within a client.
+- Projects can be frozen without removing their data. Frozen projects are excluded from active project choices, and their recognition rules retain the enabled state to restore when unfrozen.
 - Local task names are case-insensitively unique within a project. Trello tasks may duplicate names because external card identity is the key. Notification-created tasks are tracked separately so an unused one can be removed without affecting intentional local tasks.
 - Tag names are case-insensitively unique.
 - Software process names are case-insensitively unique.
@@ -118,7 +120,9 @@ The refresh is guarded by `_monthlyLogSync` and runs after database transactions
 - Each refresh creates/updates a valid SQLite backup for today.
 - The first snapshot of the day is retained separately; the latest snapshot is overwritten atomically.
 
-### Google Sheets export mode
+### Google Sheets whole-profile synchronization
+
+The complete pairing, worksheet, revision, conflict, and release-validation contract is in [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md).
 
 When `storage.logExportDestination` is `google-sheets`, automatic monthly and daily local CSV writing is disabled. Daily SQLite snapshots still run.
 
@@ -127,15 +131,18 @@ The service:
 - Is profile-scoped.
 - Stores client ID, client secret, and refresh token in Windows Credential Manager.
 - Stores non-secret account/spreadsheet/status metadata in the profile's `Settings` table.
-- Creates one spreadsheet named `Log O'clock - <profile>` and one worksheet per `yyyy-MM-dd` local start date.
-- Queues a sync five seconds after app data changes and every 15 minutes while running; Settings also exposes Sync now.
-- Merges by `EntryId`, with local rows winning for the same ID.
-- Preserves valid remote-only rows in the worksheet.
-- Uses `GoogleSheetsEntryDeletions` tombstones to remove individually deleted or automatically discarded sub-minute entry IDs from worksheets, then clears acknowledged tombstones.
+- Creates or joins one spreadsheet and stores protocol/profile metadata, an append-only revision journal, and device heartbeat/running status in hidden app-managed worksheets.
+- Records durable local mutations through transactional dirty markers and an SQLite outbox. Revision IDs deduplicate retries; the cloud row cursor advances only after local reconciliation commits.
+- Synchronizes completed entries, clients, projects, tasks, tags, configured software, recognition rules, targets/debt, Trello mappings/links, stable settings/layouts, and the shared profile name. Each entry revision also embeds its exact exclusion records and configured-software identities so selecting a cloud version or Keep both can reproduce that version precisely.
+- Excludes OAuth/Trello credentials, connection/error/update results, autostart, pending-review/runtime markers, and local running entries. Unknown observed titles and media/audio observations are never persisted or published.
+- Uses revision ancestry rather than wall-clock order. A single descendant applies automatically; concurrent heads create a persistent conflict while unrelated records continue.
+- Coalesces independently created same-path clients/projects/tasks, same-name tags, and same-process software through local identity aliases so dependent logs are preserved.
+- Keeps deletion revisions indefinitely. Confirmed grouped client/project deletion publishes deletions for the complete affected set, preventing an offline computer from resurrecting old work.
+- Reads/writes a device heartbeat about every minute. A remote running timer is read-only presence and becomes stale after two missed windows.
+- Rebuilds app-managed `yyyy-MM-dd` daily views globally by `EntryId`, in the profile's pinned worksheet time zone. They include call, creation, and modification timestamps with offsets; manual visible-sheet edits are overwritten.
+- Archives pre-protocol daily rows to `Legacy Review`. Rows absent from the owning SQLite store become one-time Import/Ignore conflicts because they have no trustworthy revision history.
 
-It **does not import remote-only worksheet rows into SQLite**. Consequently it is not multi-device synchronization and cannot make a laptop load entries created on another machine.
-
-Known gap: the current project/client bulk-removal methods delete their entries directly without first inserting `GoogleSheetsEntryDeletions` tombstones. A later cloud sync can therefore preserve those old remote rows. Treat closing this gap as a persistence/integration change with store tests; do not describe Google Sheets as a fully authoritative mirror until it is fixed.
+`CreatedUtc` is stable across edits. `ModifiedUtc` advances for meaningful entry changes, exclusions, and software associations, but not for 30-second timer checkpoints. All participating computers must run the schema-27, protocol-1 sync-capable version before joining the same spreadsheet.
 
 ## Trello data direction
 
@@ -162,13 +169,13 @@ Trello descriptions, labels, comments, due dates, attachments, and other members
 - Removing software hides/removes it from management, deletes historical entry-software associations, and clears correlated settings/tags.
 - Removing a tag converts managed description markers to plain text semantics and removes the shared definition/scope.
 
-Every destructive path must refresh derived exports. New destructive paths that remove entries should also enqueue Google deletion tombstones; project/client bulk removal is the currently documented exception.
+Every destructive path must refresh derived exports. Synchronization triggers retain durable deletion revisions for previously shared records; the legacy `GoogleSheetsEntryDeletions` rows are retained for upgrade seeding rather than being cleared after one worksheet write.
 
 ## Privacy boundary
 
 - No telemetry or app account.
 - Raw observed window titles are processed only in memory.
 - Process names can be stored only as configured Software definitions or entry associations while tracking.
-- Audio/video protection stores no sessions, media metadata, observations, or history.
+- Audio/video protection stores no sessions, media metadata, observations, or history. A user may explicitly mark a time-entry segment as a call; only that marker and its project-linked duration are stored.
 - Trello and Google are contacted only when configured for the active profile.
 - Credential values must never enter SQLite, logs, CSV, error strings, URLs used for authenticated API requests, or screenshots.

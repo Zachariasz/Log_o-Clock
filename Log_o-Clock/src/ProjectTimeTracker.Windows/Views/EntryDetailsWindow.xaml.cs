@@ -266,10 +266,21 @@ public partial class EntryDetailsWindow : Window
 
     internal string StartTimeTextForPreview => StartTimeText.Text;
 
-    internal void UpdateRunningStartForExternalChange(TimeEntry entry)
+    internal void UpdateRunningEntryForExternalChange(TimeEntry entry)
     {
-        if (entry.Id != _entryId ||
-            _updateRunningStart is null ||
+        if (entry.Id != _entryId)
+        {
+            _entryId = entry.Id;
+            _projectId = entry.ProjectId;
+            _runningStartUtc = entry.StartUtc;
+            _startTimeDirty = false;
+            TaskCombo.SelectedValue = entry.TaskId;
+            DescriptionText.Text = entry.Description ?? string.Empty;
+            SetStartTimeText(entry.StartUtc);
+            return;
+        }
+
+        if (_updateRunningStart is null ||
             _startTimeDirty ||
             StartTimeText.IsKeyboardFocusWithin)
         {

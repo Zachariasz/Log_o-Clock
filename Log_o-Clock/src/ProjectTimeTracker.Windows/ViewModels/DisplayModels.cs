@@ -75,6 +75,7 @@ public sealed record ProjectRow(Project Project, string ClientName, ProjectWorkS
     public string WeeklyTarget => FormatHours(Project.WeeklyTargetHours);
     public string MonthlyTarget => FormatHours(Project.MonthlyTargetHours);
     public string Rate => Project.HourlyRate is null ? "—" : $"{Project.HourlyRate.Value:N2} {Project.Currency}/h";
+    public string Status => Project.IsFrozen ? "Frozen" : "Active";
 
     private static string FormatHours(double? hours) => hours is null ? "—" : $"{hours.Value:0.##} h";
     private static string FormatDuration(long seconds) => $"{seconds / 3600:00}:{seconds % 3600 / 60:00}:{seconds % 60:00}";
@@ -188,10 +189,12 @@ public sealed record ProjectReportSummaryRow(
     int EntryCount,
     string Value,
     double Percentage,
-    IReadOnlyList<ReportTaskSummaryRow> Tasks)
+    IReadOnlyList<ReportTaskSummaryRow> Tasks,
+    long CallSeconds = 0)
 {
     public string TotalTime => FormatDuration(TotalSeconds);
     public string TotalWithShortIdle => FormatDuration(TotalWithShortIdleSeconds);
+    public string CallTime => FormatDuration(CallSeconds);
     public string Paid => FormatDuration(PaidSeconds);
     public string Unpaid => FormatDuration(UnpaidSeconds);
     public string Share => $"{Percentage:0.#}%";
@@ -226,11 +229,13 @@ public sealed record ReportTaskSummaryRow(
     int EntryCount,
     decimal? HourlyRate,
     string Currency,
-    DateTimeOffset? LatestActivityUtc)
+    DateTimeOffset? LatestActivityUtc,
+    long CallSeconds = 0)
 {
     public bool IsUnassigned => TaskId is null;
     public string TotalTime => FormatDuration(TotalSeconds);
     public string TotalWithShortIdle => FormatDuration(TotalWithShortIdleSeconds);
+    public string CallTime => FormatDuration(CallSeconds);
     public string Paid => FormatDuration(PaidSeconds);
     public string Unpaid => FormatDuration(UnpaidSeconds);
     public string Value => HourlyRate is null ? "—" : $"{HourlyRate.Value * TotalSeconds / 3600m:N2} {Currency}";

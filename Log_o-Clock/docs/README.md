@@ -1,8 +1,10 @@
 # Log O'clock developer documentation
 
-This folder is the starting point for a new development context. The documents describe the application as implemented in source at version **1.142.3** and SQLite schema **24**.
+This folder is the starting point for a new development context. The documents describe the application as implemented in source at version **1.142.4** and SQLite schema **27**.
 
 The root [AGENTS.md](../AGENTS.md) is the concise automatic coding-context entry point and links back to this set.
+
+Integration-specific reference: [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) documents pairing, shared/device-local boundaries, hidden worksheets, revision ancestry, conflicts, legacy upgrade, and release verification for schema-27 profile synchronization.
 
 Read in this order:
 

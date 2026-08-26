@@ -32,7 +32,8 @@ public sealed record Project(
     double? MonthlyTargetHours = null,
     decimal? HourlyRate = null,
     string Currency = "PLN",
-    bool CarryOverTargetDebtEnabled = false);
+    bool CarryOverTargetDebtEnabled = false,
+    bool IsFrozen = false);
 
 public sealed record ProjectWorkSummary(
     Guid ProjectId,
@@ -185,12 +186,111 @@ public sealed record GoogleSheetsConnection(
     bool StoreExportsInGoogleSheets = true,
     DateTimeOffset? LastSuccessfulSyncUtc = null,
     string? LastError = null,
-    bool RequiresReconnect = false);
+    bool RequiresReconnect = false,
+    Guid? SyncProfileId = null,
+    Guid? DeviceId = null,
+    string? DeviceName = null,
+    string? PinnedTimeZoneId = null,
+    int SyncProtocolVersion = 0);
 
 public sealed record GoogleSheetsSyncResult(
     int WorksheetCount,
     int EntryCount,
-    DateTimeOffset CompletedUtc);
+    DateTimeOffset CompletedUtc,
+    int ImportedCount = 0,
+    int UploadedCount = 0,
+    int ConflictCount = 0,
+    bool DataChanged = false,
+    IReadOnlyList<RemoteTimerStatus>? RemoteTimers = null,
+    string? SharedProfileName = null);
+
+public enum ProfileSyncOperation
+{
+    Upsert = 0,
+    Delete = 1,
+}
+
+public sealed record ProfileSyncChange(
+    Guid RevisionId,
+    string EntityType,
+    string EntityId,
+    IReadOnlyList<Guid> ParentRevisionIds,
+    ProfileSyncOperation Operation,
+    Guid DeviceId,
+    string DeviceName,
+    DateTimeOffset ChangedUtc,
+    string ContentHash,
+    string? PayloadJson);
+
+public enum ProfileSyncConflictKind
+{
+    ConcurrentEdit = 0,
+    DeleteVersusEdit = 1,
+    IdentityCollision = 2,
+    LegacyEntry = 3,
+    InvalidRemoteRecord = 4,
+}
+
+public sealed record ProfileSyncConflict(
+    Guid Id,
+    string EntityType,
+    string EntityId,
+    ProfileSyncConflictKind Kind,
+    IReadOnlyList<ProfileSyncChange> Heads,
+    DateTimeOffset DetectedUtc,
+    string? Summary = null,
+    string? RelatedEntityIdsJson = null);
+
+public enum ProfileSyncResolution
+{
+    KeepLocal = 0,
+    KeepCloud = 1,
+    KeepBoth = 2,
+    Delete = 3,
+    Restore = 4,
+    ImportLegacy = 5,
+    IgnoreLegacy = 6,
+}
+
+public sealed record ProfileSyncReconcileResult(
+    int ImportedCount,
+    int ConflictCount,
+    bool DataChanged);
+
+public sealed record GoogleSyncProfileMetadata(
+    Guid ProfileId,
+    string ProfileName,
+    string PinnedTimeZoneId,
+    int ProtocolVersion);
+
+public sealed record RemoteTimerStatus(
+    Guid DeviceId,
+    string DeviceName,
+    DateTimeOffset LastSeenUtc,
+    Guid? EntryId,
+    string? ClientName,
+    string? ProjectName,
+    string? TaskName,
+    DateTimeOffset? StartedUtc)
+{
+    public bool IsRunning => EntryId is not null && StartedUtc is not null;
+}
+
+public sealed record LegacyProfileSyncCandidate(
+    string CandidateId,
+    string SourceWorksheet,
+    IReadOnlyList<string> RawRow,
+    Guid? EntryId,
+    DateTimeOffset? StartUtc,
+    DateTimeOffset? EndUtc,
+    string? ClientName,
+    string? ProjectName,
+    string? TaskName,
+    string? Description,
+    bool IsPaid,
+    bool IsCall,
+    TrackingSource Source,
+    string? ValidationError = null);
 
 public static class LogExportDestinationSettings
 {
@@ -338,7 +438,8 @@ public sealed record TimeEntry(
     TrackingSource Source,
     DateTimeOffset CreatedUtc,
     DateTimeOffset ModifiedUtc,
-    bool IsPaid = false)
+    bool IsPaid = false,
+    bool IsCall = false)
 {
     public bool IsRunning => EndUtc is null;
 }
@@ -431,7 +532,10 @@ public sealed record TimeEntryView(
     bool IsPaid = false,
     decimal? HourlyRate = null,
     string Currency = "PLN",
-    string SoftwareLabels = "")
+    string SoftwareLabels = "",
+    bool IsCall = false,
+    DateTimeOffset? CreatedUtc = null,
+    DateTimeOffset? ModifiedUtc = null)
 {
     public long NetDurationSeconds(DateTimeOffset nowUtc)
     {
@@ -453,7 +557,8 @@ public sealed record ReportRow(
     long PaidDurationSeconds = 0,
     long UnpaidDurationSeconds = 0,
     DateTimeOffset? LatestActivityUtc = null,
-    long DurationWithShortIdleSeconds = 0);
+    long DurationWithShortIdleSeconds = 0,
+    long CallDurationSeconds = 0);
 
 public static class ShortIdleReportingSettings
 {

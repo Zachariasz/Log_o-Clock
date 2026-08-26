@@ -27,7 +27,7 @@ With the bundled SDK:
   -c Release --no-restore -m:1 --disable-build-servers
 ```
 
-At this documentation snapshot, the complete suite resolves to **253 passing tests**.
+At this documentation snapshot, the complete suite resolves to **294 passing tests**.
 
 ## Automated test map
 
@@ -43,7 +43,7 @@ Focused Core tests cover:
 - Idle/audio qualification, short-idle rolling policy, and setting bounds.
 - Overlap detection and recent-entry resume thresholds.
 
-API-client tests validate Trello and Google request formation, response parsing, and error/secret handling.
+API-client tests validate Trello and Google request formation, response parsing, hidden worksheet creation, append and targeted-range writes, incremental reads, retry deduplication, and error/secret handling. Multi-store tests cover Google profile joins, offline work, ancestry/forks, conflict actions, durable deletion, identity coalescing, exact entry associations, and shared-versus-local privacy boundaries.
 
 ## WPF smoke harness
 
@@ -71,7 +71,7 @@ $env:PROJECT_TIME_TRACKER_SMOKE_HEIGHT = "900"
 
 Never run smoke mode without an isolated data directory on a machine containing real Log O'clock data.
 
-Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpanded`, `Projects`, `Targets`, `Tasks`, `Tags`, `Software`, `Rules`, `Reports`, and `Settings`.
+Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpanded`, `Projects`, `Targets`, `Tasks`, `Tags`, `Software`, `Rules`, `Reports`, `Settings`, `SettingsIntegrations`, `GoogleSheetsConnection`, and `SyncConflicts`.
 
 Feature flags follow `PROJECT_TIME_TRACKER_SMOKE_VERIFY_<AREA>`. Current source contains checks for profiles, branding, English UI, tab-filter reset, timer/tray/task search, recognition start/switch/click-away, History filters/grouping/global column sorting/continue/overlap/view, Reports charts/selection/sorting/view, targets/debt/sidebar, software, idle/session/recovery, Trello UI, and entry-editor behaviours. `PROJECT_TIME_TRACKER_SMOKE_VERIFY_HISTORY_GLOBAL_SORT=true` exercises the Client and Project header handlers across multiple days and clients, then verifies that clearing sorting restores day grouping.
 
@@ -100,6 +100,7 @@ Automated checks do not fully replace manual Windows validation for:
 - Touchpad horizontal scrolling and nested smooth scrolling.
 - DWM rounding, custom maximize bounds, DPI scaling, and taskbar placement.
 - Windows Credential Manager and real Trello/Google OAuth/rate limits.
+- Google Sheets two-computer create/join, offline edits, reconnect, edit/delete conflicts, remote running presence/staleness, and final convergence. Follow [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md).
 - Autostart registry and installer upgrade/uninstall.
 
 ## Packaging
@@ -161,7 +162,7 @@ tar.exe -a -c -f outputs\LogOClock-source-<version>.zip `
 - Implement it transactionally in `SqliteTrackerStore`.
 - If schema changes, bump `SchemaVersion` and add guarded migration logic.
 - Test fresh schema and upgrade path.
-- Verify derived local files and Google tombstones/sync implications.
+- Verify derived local files and durable Google journal/deletion/conflict implications.
 
 ### WPF feature change
 

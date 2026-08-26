@@ -8,6 +8,11 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed class GoogleSheetsApiClient : IGoogleSheetsApiClient, IDisposable
 {
+    // Initial exports can create a spreadsheet and synchronize a substantial history.
+    // Google or an intervening network proxy can take longer than the former 45-second
+    // request budget before responding, while the synchronization service remains
+    // single-flight and cancellable.
+    private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(2);
     private readonly HttpClient _httpClient;
     private readonly bool _ownsClient;
 
@@ -15,7 +20,7 @@ public sealed class GoogleSheetsApiClient : IGoogleSheetsApiClient, IDisposable
     {
         _ownsClient = httpClient is null;
         _httpClient = httpClient ?? new HttpClient();
-        _httpClient.Timeout = TimeSpan.FromSeconds(45);
+        _httpClient.Timeout = RequestTimeout;
     }
 
     public async Task<GoogleOAuthTokens> ExchangeAuthorizationCodeAsync(
@@ -132,7 +137,7 @@ public sealed class GoogleSheetsApiClient : IGoogleSheetsApiClient, IDisposable
         var requestedNames = worksheetNames.Distinct(StringComparer.Ordinal).ToArray();
         var ranges = string.Join(
             "&",
-            requestedNames.Select(name => $"ranges={Uri.EscapeDataString(WorksheetRange(name, "A:Q"))}"));
+            requestedNames.Select(name => $"ranges={Uri.EscapeDataString(WorksheetRange(name, "A:T"))}"));
         using var document = await SendJsonAsync(
             HttpMethod.Get,
             $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}/values:batchGet?majorDimension=ROWS&{ranges}",
@@ -206,7 +211,7 @@ public sealed class GoogleSheetsApiClient : IGoogleSheetsApiClient, IDisposable
             valueInputOption = "RAW",
             data = worksheets.Select(item => new
             {
-                range = WorksheetRange(item.Key, $"A1:Q{Math.Max(1, item.Value.Count)}"),
+                range = WorksheetRange(item.Key, $"A1:T{Math.Max(1, item.Value.Count)}"),
                 majorDimension = "ROWS",
                 values = item.Value,
             }),
@@ -214,6 +219,109 @@ public sealed class GoogleSheetsApiClient : IGoogleSheetsApiClient, IDisposable
         using var document = await SendJsonAsync(
             HttpMethod.Post,
             $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}/values:batchUpdate",
+            accessToken,
+            body,
+            cancellationToken);
+    }
+
+    public async Task AddHiddenWorksheetsAsync(
+        string accessToken,
+        string spreadsheetId,
+        IReadOnlyList<string> worksheetNames,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(worksheetNames);
+        var names = worksheetNames.Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length == 0)
+        {
+            return;
+        }
+
+        var body = JsonSerializer.Serialize(new
+        {
+            requests = names.Select(name => new
+            {
+                addSheet = new { properties = new { title = name, hidden = true } },
+            }),
+        });
+        using var document = await SendJsonAsync(
+            HttpMethod.Post,
+            $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}:batchUpdate",
+            accessToken,
+            body,
+            cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<IReadOnlyList<string>>> ReadRangeAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        CancellationToken cancellationToken = default)
+    {
+        using var document = await SendJsonAsync(
+            HttpMethod.Get,
+            $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}/values/{Uri.EscapeDataString(Required(range, nameof(range)))}?majorDimension=ROWS",
+            accessToken,
+            body: null,
+            cancellationToken);
+        if (!document.RootElement.TryGetProperty("values", out var values))
+        {
+            return [];
+        }
+
+        return values.EnumerateArray()
+            .Select(row => (IReadOnlyList<string>)row.EnumerateArray()
+                .Select(cell => cell.ValueKind == JsonValueKind.String
+                    ? cell.GetString() ?? string.Empty
+                    : cell.ToString())
+                .ToArray())
+            .ToArray();
+    }
+
+    public async Task AppendRowsAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        var body = JsonSerializer.Serialize(new
+        {
+            range,
+            majorDimension = "ROWS",
+            values = rows,
+        });
+        using var document = await SendJsonAsync(
+            HttpMethod.Post,
+            $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}/values/{Uri.EscapeDataString(Required(range, nameof(range)))}:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS",
+            accessToken,
+            body,
+            cancellationToken);
+    }
+
+    public async Task WriteRangeAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        var body = JsonSerializer.Serialize(new
+        {
+            range,
+            majorDimension = "ROWS",
+            values = rows,
+        });
+        using var document = await SendJsonAsync(
+            HttpMethod.Put,
+            $"https://sheets.googleapis.com/v4/spreadsheets/{Uri.EscapeDataString(spreadsheetId)}/values/{Uri.EscapeDataString(Required(range, nameof(range)))}?valueInputOption=RAW",
             accessToken,
             body,
             cancellationToken);

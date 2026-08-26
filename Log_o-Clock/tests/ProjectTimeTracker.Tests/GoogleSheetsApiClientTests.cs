@@ -57,7 +57,40 @@ public sealed class GoogleSheetsApiClientTests
         Assert.Equal(["EntryId"], Assert.Single(rows["2026-08-06"]));
         Assert.Empty(rows["2026-08-07"]);
         Assert.Contains("values:batchGet", handler.RequestUris[1]);
+        Assert.Contains("A%3AT", handler.RequestUris[1], StringComparison.OrdinalIgnoreCase);
         Assert.Contains("values:batchUpdate", handler.RequestUris[2]);
+    }
+
+    [Fact]
+    public async Task TechnicalJournalOperationsUseHiddenAppendIncrementalReadAndTargetedWrite()
+    {
+        var handler = new TechnicalWorksheetHandler();
+        using var client = new GoogleSheetsApiClient(new HttpClient(handler));
+
+        await client.AddHiddenWorksheetsAsync("secret-access-token", "sheet-1", ["__LogOClockChanges"]);
+        await client.AppendRowsAsync(
+            "secret-access-token",
+            "sheet-1",
+            "'__LogOClockChanges'!A:J",
+            [["revision-1", "TimeEntries"]]);
+        var rows = await client.ReadRangeAsync(
+            "secret-access-token",
+            "sheet-1",
+            "'__LogOClockChanges'!A2:J");
+        await client.WriteRangeAsync(
+            "secret-access-token",
+            "sheet-1",
+            "'__LogOClockDevices'!A2:I2",
+            [["device-1", "Laptop"]]);
+
+        Assert.Equal(["revision-1", "TimeEntries"], Assert.Single(rows));
+        Assert.Contains("\"hidden\":true", handler.RequestBodies[0]);
+        Assert.Contains(":append", handler.RequestUris[1]);
+        Assert.Contains("insertDataOption=INSERT_ROWS", handler.RequestUris[1]);
+        Assert.Contains("A2%3AJ", handler.RequestUris[2], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(HttpMethod.Put, handler.Methods[3]);
+        Assert.All(handler.AuthorizationValues, value => Assert.Equal("Bearer secret-access-token", value));
+        Assert.DoesNotContain(handler.RequestBodies, body => body.Contains("secret-access-token", StringComparison.Ordinal));
     }
 
     private sealed class StubHandler(HttpStatusCode status, string content) : HttpMessageHandler
@@ -113,10 +146,34 @@ public sealed class GoogleSheetsApiClientTests
             {
                 return Task.FromResult(Response(
                     HttpStatusCode.OK,
-                    "{\"valueRanges\":[{\"range\":\"'2026-08-06'!A:Q\",\"values\":[[\"EntryId\"]]},{\"range\":\"'2026-08-07'!A:Q\"}]}"));
+                    "{\"valueRanges\":[{\"range\":\"'2026-08-06'!A:T\",\"values\":[[\"EntryId\"]]},{\"range\":\"'2026-08-07'!A:T\"}]}"));
             }
 
             return Task.FromResult(Response(HttpStatusCode.OK, "{}"));
+        }
+    }
+
+    private sealed class TechnicalWorksheetHandler : HttpMessageHandler
+    {
+        public List<string> RequestUris { get; } = [];
+        public List<string> RequestBodies { get; } = [];
+        public List<HttpMethod> Methods { get; } = [];
+        public List<string> AuthorizationValues { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Methods.Add(request.Method);
+            RequestUris.Add(request.RequestUri?.AbsoluteUri ?? string.Empty);
+            AuthorizationValues.Add(request.Headers.Authorization?.ToString() ?? string.Empty);
+            RequestBodies.Add(request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken));
+            var content = request.Method == HttpMethod.Get
+                ? "{\"values\":[[\"revision-1\",\"TimeEntries\"]]}"
+                : "{}";
+            return Response(HttpStatusCode.OK, content);
         }
     }
 

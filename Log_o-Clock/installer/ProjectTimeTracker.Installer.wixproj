@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
-    <ProductVersion Condition="'$(ProductVersion)' == ''">1.142.3</ProductVersion>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">1.142.4</ProductVersion>
     <OutputName>LogOClock-Setup-$(ProductVersion)</OutputName>
     <DefineConstants>AppPublishDir=$(AppPublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
   </PropertyGroup>

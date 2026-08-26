@@ -15,6 +15,20 @@ public partial class GoogleSheetsConnectionWindow : Window
         Loaded += (_, _) => ClientIdText.Focus();
     }
 
+    private void ConnectionMode_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (ExistingSpreadsheetPanel is null)
+        {
+            return;
+        }
+
+        ExistingSpreadsheetPanel.Visibility = UseExistingRadio.IsChecked == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
     private void OpenGoogleCloud_Click(object sender, RoutedEventArgs e)
     {
         _ = sender;
@@ -37,12 +51,23 @@ public partial class GoogleSheetsConnectionWindow : Window
             return;
         }
 
+        var useExisting = UseExistingRadio.IsChecked == true;
+        var spreadsheet = SpreadsheetText.Text.Trim();
+        if (useExisting && spreadsheet.Length == 0)
+        {
+            ValidationText.Text = "Paste the shared Google Sheets URL or spreadsheet ID.";
+            SpreadsheetText.Focus();
+            return;
+        }
+
         ConnectButton.IsEnabled = false;
         ValidationText.Foreground = (System.Windows.Media.Brush)FindResource("ContentSecondaryBrush");
-        ValidationText.Text = "Waiting for authorization in your browserâ€¦";
+        ValidationText.Text = "Waiting for authorization in your browser…";
         try
         {
-            _ = await _syncService.ConnectAsync(clientId, clientSecret);
+            _ = useExisting
+                ? await _syncService.ConnectExistingAsync(clientId, clientSecret, spreadsheet)
+                : await _syncService.ConnectAsync(clientId, clientSecret);
             DialogResult = true;
         }
         catch (Exception exception)

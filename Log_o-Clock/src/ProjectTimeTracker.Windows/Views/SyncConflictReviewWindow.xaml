@@ -1,0 +1,57 @@
+<Window x:Class="ProjectTimeTracker.Windows.Views.SyncConflictReviewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Synchronization conflicts" Width="940" Height="620" MinWidth="760" MinHeight="480"
+        Style="{StaticResource DialogWindowStyle}" WindowStartupLocation="CenterOwner">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel Margin="0,0,0,16">
+            <TextBlock Text="Review synchronization conflicts" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock x:Name="IntroText" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}"
+                       TextWrapping="Wrap"
+                       Text="Unrelated records continue synchronizing. Choose which version should become the shared result for each item." />
+        </StackPanel>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="0.9*" />
+                <ColumnDefinition Width="1.1*" />
+            </Grid.ColumnDefinitions>
+            <ListBox x:Name="ConflictList" SelectionChanged="ConflictList_SelectionChanged"
+                     DisplayMemberPath="Label" AutomationProperties.Name="Unresolved synchronization conflicts" />
+            <Border Grid.Column="1" Margin="14,0,0,0" Padding="16"
+                    Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                    BorderThickness="1" CornerRadius="{StaticResource Radius.Navigation}">
+                <StackPanel>
+                    <TextBlock x:Name="ConflictHeadingText" FontSize="17" FontWeight="SemiBold"
+                               Text="Select a conflict" />
+                    <TextBlock x:Name="ConflictSummaryText" Margin="0,6,0,14" TextWrapping="Wrap"
+                               Foreground="{StaticResource ContentSecondaryBrush}" />
+                    <TextBlock x:Name="CloudVersionLabel" Text="Cloud version" FontWeight="SemiBold"
+                               Margin="0,0,0,5" Visibility="Collapsed" />
+                    <ComboBox x:Name="CloudVersionCombo" DisplayMemberPath="Label" Visibility="Collapsed"
+                              AutomationProperties.Name="Cloud version to keep" />
+                    <TextBlock x:Name="AffectedItemsText" Margin="0,13,0,0" TextWrapping="Wrap"
+                               Foreground="{StaticResource MutedBrush}" />
+                    <WrapPanel Margin="0,20,0,0">
+                        <Button x:Name="KeepLocalButton" Content="Keep local" Click="KeepLocal_Click" Visibility="Collapsed" />
+                        <Button x:Name="KeepCloudButton" Content="Keep selected cloud" Click="KeepCloud_Click" Visibility="Collapsed" />
+                        <Button x:Name="KeepBothButton" Content="Keep both" Click="KeepBoth_Click" Visibility="Collapsed" />
+                        <Button x:Name="RestoreButton" Content="Restore edited" Click="Restore_Click" Visibility="Collapsed" />
+                        <Button x:Name="DeleteButton" Content="Delete" Click="Delete_Click" Visibility="Collapsed" />
+                        <Button x:Name="ImportLegacyButton" Content="Import" Click="ImportLegacy_Click" Visibility="Collapsed" />
+                        <Button x:Name="IgnoreLegacyButton" Content="Ignore" Click="IgnoreLegacy_Click" Visibility="Collapsed" />
+                    </WrapPanel>
+                    <TextBlock x:Name="ActionStatusText" Margin="0,12,0,0" TextWrapping="Wrap"
+                               Foreground="{StaticResource DangerBrush}" />
+                </StackPanel>
+            </Border>
+        </Grid>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Close" IsCancel="True" />
+        </StackPanel>
+    </Grid>
+</Window>

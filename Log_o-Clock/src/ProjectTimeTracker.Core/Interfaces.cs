@@ -113,6 +113,28 @@ public interface IGoogleSheetsApiClient
         string spreadsheetId,
         IReadOnlyDictionary<string, IReadOnlyList<IReadOnlyList<object?>>> worksheets,
         CancellationToken cancellationToken = default);
+    Task AddHiddenWorksheetsAsync(
+        string accessToken,
+        string spreadsheetId,
+        IReadOnlyList<string> worksheetNames,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<IReadOnlyList<string>>> ReadRangeAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        CancellationToken cancellationToken = default);
+    Task AppendRowsAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default);
+    Task WriteRangeAsync(
+        string accessToken,
+        string spreadsheetId,
+        string range,
+        IReadOnlyList<IReadOnlyList<object?>> rows,
+        CancellationToken cancellationToken = default);
 }
 
 public interface IGoogleSheetsSyncService : IAsyncDisposable
@@ -120,7 +142,14 @@ public interface IGoogleSheetsSyncService : IAsyncDisposable
     event EventHandler<GoogleSheetsSyncResult>? SyncCompleted;
     Task<GoogleSheetsConnection?> GetConnectionAsync(CancellationToken cancellationToken = default);
     Task<GoogleSheetsConnection> ConnectAsync(string clientId, string clientSecret, CancellationToken cancellationToken = default);
+    Task<GoogleSheetsConnection> ConnectExistingAsync(string clientId, string clientSecret, string spreadsheetUrlOrId, CancellationToken cancellationToken = default);
     Task SetCloudExportEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task SetDeviceNameAsync(string deviceName, CancellationToken cancellationToken = default);
+    Task SetProfileNameAsync(string profileName, CancellationToken cancellationToken = default);
+    Task SetPinnedTimeZoneAsync(string timeZoneId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProfileSyncConflict>> GetConflictsAsync(CancellationToken cancellationToken = default);
+    Task ResolveConflictAsync(Guid conflictId, ProfileSyncResolution resolution, Guid? cloudRevisionId = null, CancellationToken cancellationToken = default);
+    IReadOnlyList<RemoteTimerStatus> RemoteTimers { get; }
     Task DisconnectAsync(CancellationToken cancellationToken = default);
     Task<GoogleSheetsSyncResult> SyncNowAsync(CancellationToken cancellationToken = default);
     void QueueSync();
@@ -179,8 +208,8 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<IReadOnlyList<TagDefinition>> GetTagsAsync(Guid? projectId = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TagSummary>> GetTagSummariesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SoftwareDefinition>> GetSoftwareAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<ProjectSoftwareDefinition>> GetProjectSoftwareAsync(Guid? projectId = null, CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<RecognitionRule>> GetRulesAsync(Guid? projectId = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProjectSoftwareDefinition>> GetProjectSoftwareAsync(Guid? projectId = null, bool includeFrozen = false, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<RecognitionRule>> GetRulesAsync(Guid? projectId = null, bool includeFrozen = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<RecognitionCandidate>> GetRecognitionCandidatesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ProjectOption>> GetProjectOptionsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CustomTarget>> GetCustomTargetsAsync(CancellationToken cancellationToken = default);
@@ -215,6 +244,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task RestoreProjectTargetDebtAsync(Guid projectId, DateTimeOffset restoredUtc, CancellationToken cancellationToken = default);
     Task RenameClientAsync(Guid clientId, string name, CancellationToken cancellationToken = default);
     Task RenameProjectAsync(Guid projectId, string name, CancellationToken cancellationToken = default);
+    Task SetProjectFrozenAsync(Guid projectId, bool isFrozen, CancellationToken cancellationToken = default);
     Task UpdateProjectColorAsync(Guid projectId, string color, CancellationToken cancellationToken = default);
     Task UpdateProjectSettingsAsync(Guid projectId, double? dailyTargetHours, double? weeklyTargetHours, double? monthlyTargetHours, decimal? hourlyRate, string currency, bool? carryOverTargetDebtEnabled = null, CancellationToken cancellationToken = default);
     Task UpdateProjectSettingsAsync(Guid projectId, Guid clientId, double? dailyTargetHours, double? weeklyTargetHours, double? monthlyTargetHours, decimal? hourlyRate, string currency, bool? carryOverTargetDebtEnabled = null, CancellationToken cancellationToken = default);
@@ -276,7 +306,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
         DateTimeOffset nowUtc,
         TimeSpan maximumGap,
         CancellationToken cancellationToken = default);
-    Task<TimeEntry> SplitRunningTimerAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
+    Task<TimeEntry> SplitRunningTimerAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default, bool? isCall = null);
     Task<TimeEntry> SwitchRunningTimerAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, TrackingSource source, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<TimeEntry?> StopRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task CheckpointRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
@@ -284,8 +314,8 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task UpdateEntryDetailsAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task UpdateEntryAssignmentAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<bool> RecordSoftwareUsageAsync(Guid entryId, string processName, CancellationToken cancellationToken = default);
-    Task AddManualEntryAsync(Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, CancellationToken cancellationToken = default);
-    Task UpdateTimeEntryAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, long excludedSeconds = 0, CancellationToken cancellationToken = default);
+    Task AddManualEntryAsync(Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, bool isCall = false, CancellationToken cancellationToken = default);
+    Task UpdateTimeEntryAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, long excludedSeconds = 0, CancellationToken cancellationToken = default, bool? isCall = null);
     Task SetEntriesPaidAsync(IReadOnlyCollection<Guid> entryIds, bool isPaid, CancellationToken cancellationToken = default);
     Task DeleteTimeEntryAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task AddExclusionAsync(Guid entryId, DateTimeOffset startUtc, DateTimeOffset endUtc, string reason, CancellationToken cancellationToken = default);
@@ -298,5 +328,31 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<IReadOnlyList<ReportRow>> GetReportAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, ReportFilter filter, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> GetGoogleSheetsEntryDeletionIdsAsync(CancellationToken cancellationToken = default);
     Task CompleteGoogleSheetsEntryDeletionsAsync(IReadOnlyCollection<Guid> entryIds, CancellationToken cancellationToken = default);
+    Task<bool> HasUserProfileDataAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProfileSyncChange>> CaptureProfileSyncChangesAsync(
+        Guid deviceId,
+        string deviceName,
+        bool seedAll,
+        CancellationToken cancellationToken = default);
+    Task AcknowledgeProfileSyncChangesAsync(
+        IReadOnlyCollection<Guid> revisionIds,
+        CancellationToken cancellationToken = default);
+    Task<long> GetProfileSyncCloudCursorAsync(CancellationToken cancellationToken = default);
+    Task SetProfileSyncCloudCursorAsync(long cursor, CancellationToken cancellationToken = default);
+    Task<ProfileSyncReconcileResult> ReconcileProfileSyncChangesAsync(
+        IReadOnlyList<ProfileSyncChange> cloudChanges,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ProfileSyncConflict>> GetProfileSyncConflictsAsync(CancellationToken cancellationToken = default);
+    Task ResolveProfileSyncConflictAsync(
+        Guid conflictId,
+        ProfileSyncResolution resolution,
+        Guid? cloudRevisionId,
+        Guid deviceId,
+        string deviceName,
+        DateTimeOffset resolvedUtc,
+        CancellationToken cancellationToken = default);
+    Task RegisterLegacyProfileSyncCandidatesAsync(
+        IReadOnlyList<LegacyProfileSyncCandidate> candidates,
+        CancellationToken cancellationToken = default);
 
 }

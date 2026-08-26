@@ -4,10 +4,10 @@
 
 - Product: **Log O'clock**.
 - Author: **Zachariasz Jędrzejczyk**.
-- Current source version: **1.142.3**.
+- Current source version: **1.142.4**.
 - Platform: Windows x64, WPF, .NET 10 (`net10.0-windows10.0.19041.0`).
 - SDK pinned by `global.json`: **10.0.301**, rolling to the latest compatible feature band.
-- Persistence: per-profile SQLite, current schema **24**.
+- Persistence: per-profile SQLite, current schema **27**.
 - Installer: self-contained single-file app plus a WiX 5 per-machine **MSI**. It is not MSIX.
 - Product name changed after the original implementation. Namespaces, project folders, the single-instance mutex, registry compatibility paths, and the `PROJECT_TIME_TRACKER_*` smoke variables intentionally retain the old `ProjectTimeTracker` name.
 
@@ -17,7 +17,7 @@ Log O'clock is a local-first time tracker organized as:
 
 `Client → Project → Saved task → Time entry`
 
-It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional Google Sheets export synchronization.
+It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional two-way whole-profile Google Sheets synchronization.
 
 The detailed behaviour list is in the root [README.md](../README.md). Do not reconstruct requirements from old conversation history when the current source, tests, and README already answer the question.
 
@@ -33,7 +33,7 @@ The detailed behaviour list is in the root [README.md](../README.md). Do not rec
 | Change profiles and paths | `src/ProjectTimeTracker.Infrastructure/ProfileCatalog.cs` |
 | Change local safety files | `MonthlyLogWriter.cs` and `DailySafetyArchive.cs` |
 | Change Trello | `TrelloApiClient.cs`, `TrelloSyncService.cs`, and Trello store methods |
-| Change Google Sheets | `GoogleSheetsApiClient.cs`, `GoogleSheetsSyncService.cs`, and Settings UI |
+| Change Google Sheets | `GoogleSheetsApiClient.cs`, `GoogleSheetsSyncService.cs`, `SqliteTrackerStore.Sync.cs`, Settings/conflict UI, and [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) |
 | Change styling | `Themes/CodexDark.*.xaml`, `App.xaml`, and `CodexDarkDesignRules.md` |
 | Find a feature's complete code surface | [FEATURE_MAP.md](FEATURE_MAP.md) |
 
@@ -61,7 +61,7 @@ Make narrow edits in these files. Preserve named XAML controls and handler signa
 6. **Unknown raw window titles are memory-only.** Recognition rules are stored; observed unknown titles and media/audio observations are not.
 7. **Project/client removal is destructive.** Project entries and related metadata are removed. Task-only removal remains archival when history needs the task identity.
 8. **Active objects feed filters and choosers.** Removed/archived objects must not return to current UI options.
-9. **Google Sheets is not local restore or two-way device sync.** It writes/merges exported rows in worksheets but never imports remote rows into SQLite.
+9. **Google Sheets uses the hidden revision journal, not visible rows.** Validated completed-record/configuration revisions can reconcile into SQLite; remote running timers are read-only device presence, and visible daily-sheet edits are overwritten.
 10. **Trello is one-way and read-only.** It may control linked task identity/name; it never writes cards.
 11. **Every profile is isolated.** Database, settings, mappings, credentials, exports, and background sync services are profile-scoped.
 12. **Use semantic theme resources.** Project and tag colors are data; they must not recolor shell selection or standard actions.
@@ -74,7 +74,7 @@ Most successful mutations follow this pattern:
 2. The store commits the SQLite transaction and refreshes derived local files.
 3. The controller raises `DataChanged` and/or `RunningEntryChanged`.
 4. `MainWindow` refreshes visible collections and filters.
-5. `App` refreshes the tray and queues Google Sheets sync after a five-second debounce.
+5. `App` refreshes the tray and queues Google Sheets reconciliation after a five-second debounce; a one-minute loop also maintains device heartbeat and retries after network recovery.
 
 If code writes directly through `ITrackerStore` from the UI, it usually must call `_controller.NotifyDataChanged()` afterward. Missing this step commonly causes stale main-window, tray, or cloud-export state.
 
@@ -116,8 +116,8 @@ Before handing off:
 
 - Windows/WPF is the only host. Core interfaces make a later host possible, but there is no macOS implementation.
 - Profiles separate data but are not password-protected OS accounts.
-- Google Sheets export preserves remote worksheet-only rows during merge but does not create local entries from them.
-- Direct entry deletion is synchronized through Google tombstones, but project/client bulk deletion currently does not enqueue the deleted entry IDs; existing worksheet rows can therefore survive that bulk removal.
+- Google Sheets requires every participating computer to run the schema-27/protocol-1 version. Legacy visible-only rows are archived and offered as explicit Import/Ignore candidates.
+- Deletion revisions are durable. Project/client removal produces dependent deletion records; a concurrent parent-delete/offline-work case remains grouped for explicit destructive review.
 - Daily database snapshots exist, but there is no in-app restore UI.
 - The UI smoke suite is embedded in `App.xaml.cs`/`MainWindow.xaml.cs`, not a separate UI-test project.
 - The MSI is unsigned unless a certificate is supplied to the release script.

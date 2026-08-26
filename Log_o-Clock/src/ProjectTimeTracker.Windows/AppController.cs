@@ -270,6 +270,55 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
+    public async Task ReloadSynchronizedProfileSettingsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        _recognitionCandidates = await _store.GetRecognitionCandidatesAsync(cancellationToken);
+        await ReloadSoftwareSettingsCoreAsync(cancellationToken);
+        RecognitionEnabled = !string.Equals(
+            await _store.GetSettingAsync("recognition.enabled", cancellationToken),
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+        CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
+            await _store.GetSettingAsync(IdleProtectionSettings.CallsEnabledKey, cancellationToken));
+        VideoIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
+            await _store.GetSettingAsync(IdleProtectionSettings.VideoEnabledKey, cancellationToken));
+        ExcludedSoftwareReviewMinimumMinutes = ExcludedSoftwareReviewSettings.ParseMinimumMinutes(
+            await _store.GetSettingAsync(ExcludedSoftwareReviewSettings.MinimumMinutesKey, cancellationToken));
+        AccumulatedAwayReviewMinimumMinutes = AccumulatedAwayReviewSettings.ParseMinimumMinutes(
+            await _store.GetSettingAsync(AccumulatedAwayReviewSettings.MinimumMinutesKey, cancellationToken));
+        RecentEntryResumeMaximumGapMinutes = RecentEntryResumeSettings.ParseMaximumGapMinutes(
+            await _store.GetSettingAsync(RecentEntryResumeSettings.MaximumGapMinutesKey, cancellationToken));
+        ShortIdleReportingMaximumMinutes = ShortIdleReportingSettings.ParseMaximumMinutes(
+            await _store.GetSettingAsync(ShortIdleReportingSettings.MaximumMinutesKey, cancellationToken));
+        TargetReviewSchedule = TargetReviewSettings.Parse(
+            await _store.GetSettingAsync(TargetReviewSettings.EnabledKey, cancellationToken),
+            await _store.GetSettingAsync(TargetReviewSettings.DayOfWeekKey, cancellationToken),
+            await _store.GetSettingAsync(TargetReviewSettings.MonthWeekKey, cancellationToken));
+        BreakReminderIntervalMinutes = BreakReminderSettings.ParseIntervalMinutes(
+            await _store.GetSettingAsync(BreakReminderSettings.IntervalMinutesKey, cancellationToken));
+        BreakReminderPlacement = BreakReminderSettings.ParsePlacement(
+            await _store.GetSettingAsync(BreakReminderSettings.PlacementKey, cancellationToken));
+        var sessionBehaviorValue = await _store.GetSettingAsync(
+            SessionTrackingSettings.BehaviorKey,
+            cancellationToken);
+        SessionTrackingBehavior = Enum.TryParse<SessionTrackingBehavior>(
+            sessionBehaviorValue,
+            ignoreCase: true,
+            out var sessionBehavior)
+                ? sessionBehavior
+                : SessionTrackingBehavior.StopTimer;
+        _idleProtectionMonitor.Configure(
+            CallsIdleProtectionEnabled,
+            VideoIdleProtectionEnabled);
+        ResetBreakReminderStreak();
+        DataChanged?.Invoke(this, EventArgs.Empty);
+        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        {
+            QueueActivity(activity);
+        }
+    }
+
     public async Task SetRecognitionEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         RecognitionEnabled = enabled;
@@ -479,9 +528,17 @@ public sealed class AppController : IAsyncDisposable
         }
     }
 
-    public async Task ReloadRecognitionAsync(CancellationToken cancellationToken = default)
+    public async Task ReloadRecognitionAsync(
+        bool dismissActiveReminder = false,
+        CancellationToken cancellationToken = default)
     {
         _recognitionCandidates = await _store.GetRecognitionCandidatesAsync(cancellationToken);
+        if (dismissActiveReminder)
+        {
+            _notificationService.DismissActive();
+            _recognitionDebounce?.Cancel();
+        }
+
         DataChanged?.Invoke(this, EventArgs.Empty);
         if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
@@ -608,6 +665,43 @@ public sealed class AppController : IAsyncDisposable
             ModifiedUtc = _clock.UtcNow,
         };
         DataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task<TimeEntry> SetRunningCallTrackingAsync(
+        bool isCall,
+        CancellationToken cancellationToken = default)
+    {
+        if (RunningEntry is not { } runningEntry)
+        {
+            throw new InvalidOperationException("There is no running timer to mark as a call.");
+        }
+
+        if (runningEntry.IsCall == isCall)
+        {
+            return runningEntry;
+        }
+
+        var nowUtc = _clock.UtcNow;
+        await ReviewExcludedSoftwareVisitsAsync(nowUtc);
+        await ReviewIdleCandidateAsync(nowUtc);
+        CompleteBreakReminderEntry();
+        RunningEntry = await _store.SplitRunningTimerAsync(
+            runningEntry.Id,
+            runningEntry.TaskId,
+            runningEntry.Description,
+            nowUtc,
+            cancellationToken,
+            isCall);
+        ResetExcludedSoftwareTracking();
+        RunningExcludedSeconds = 0;
+        BeginBreakReminderEntry();
+        await RecordInitialSoftwareAsync(
+            RunningEntry.Id,
+            RunningEntry.Source,
+            cancellationToken);
+        RunningEntryChanged?.Invoke(this, RunningEntry);
+        DataChanged?.Invoke(this, EventArgs.Empty);
+        return RunningEntry;
     }
 
     public async Task<TimeEntry> UpdateRunningStartAsync(
@@ -1192,6 +1286,9 @@ public sealed class AppController : IAsyncDisposable
                 DataChanged?.Invoke(this, EventArgs.Empty);
             }
 
+            // Reaching the user's short-idle review threshold means the work streak
+            // was interrupted, whether the recorded time is kept or removed.
+            ResetBreakReminderStreak();
             review.NextPromptMultiplier = ShortIdleReviewPolicy.NextPromptMultiplier(
                 review.NextPromptMultiplier,
                 shouldRemove);
@@ -2057,6 +2154,11 @@ public sealed class AppController : IAsyncDisposable
             }
 
             DataChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (!isUnavailableSession)
+        {
+            ResetBreakReminderStreak();
         }
 
         if (isUnavailableSession)

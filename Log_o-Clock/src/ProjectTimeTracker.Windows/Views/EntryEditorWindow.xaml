@@ -105,8 +105,12 @@
                                                Style="{StaticResource TagEditorStyle}"
                                                Margin="0,4,0,0" />
 
-                <CheckBox x:Name="PaidCheck" Grid.Row="8" Margin="3,12,3,0"
-                          Content="This entry has been paid" />
+                <StackPanel Grid.Row="8" Orientation="Horizontal" Margin="3,12,3,0">
+                    <CheckBox x:Name="PaidCheck" Content="This entry has been paid" />
+                    <CheckBox x:Name="CallCheck" Margin="18,0,0,0"
+                              Content="This entry was a call"
+                              ToolTip="Counts this entry's net duration as call time in project reports" />
+                </StackPanel>
             </Grid>
         </ScrollViewer>
 
