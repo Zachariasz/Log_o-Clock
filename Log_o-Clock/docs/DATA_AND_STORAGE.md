@@ -87,7 +87,7 @@ Additional singleton/operational tables are `TrelloConnections`, `Settings`, `Go
 - Client names are case-insensitively unique.
 - Project names are unique within a client.
 - Projects can be frozen without removing their data. Frozen projects are excluded from active project choices, and their recognition rules retain the enabled state to restore when unfrozen.
-- Local task names are case-insensitively unique within a project. Trello tasks may duplicate names because external card identity is the key. Notification-created tasks are tracked separately so an unused one can be removed without affecting intentional local tasks.
+- Local task names are case-insensitively unique within a project. Trello tasks may duplicate names because external card identity is the key. Notification-created tasks are tracked separately so an unused one can be removed without affecting intentional local tasks. Recognition may correct a matched non-Trello task's whitespace in place when it is otherwise identical to the spaced filename fallback; the task ID and history are preserved, while Trello-controlled names remain immutable.
 - Tag names are case-insensitively unique.
 - Software process names are case-insensitively unique.
 - One partial unique index permits only one `TimeEntries.EndUtc IS NULL` row.

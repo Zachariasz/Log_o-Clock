@@ -170,6 +170,7 @@ public partial class App : System.Windows.Application
             Guid? recognitionSwitchCurrentProjectId = null;
             Guid? recognitionSwitchTargetProjectId = null;
             Guid? recognitionSwitchTargetTaskId = null;
+            Guid? recognitionFileFallbackProjectId = null;
             var startupSmokeActivity = verifyNoStartupPopup
                 ? new WindowActivity(
                     42,
@@ -240,6 +241,10 @@ public partial class App : System.Windows.Application
                     client.Id,
                     $"Recognized target project {Guid.NewGuid():N}",
                     "#0D8F68");
+                var fileFallbackProject = await _store.AddProjectAsync(
+                    client.Id,
+                    $"Recognized file fallback project {Guid.NewGuid():N}",
+                    "#1C7494");
                 var currentTask = await _store.AddTaskAsync(currentProject.Id, "Current task");
                 var targetTask = await _store.AddTaskAsync(targetProject.Id, "Recognized task");
                 await _store.AddRuleAsync(
@@ -250,6 +255,10 @@ public partial class App : System.Windows.Application
                     targetProject.Id,
                     "Target project smoke window",
                     "target-smoke-app");
+                await _store.AddRuleAsync(
+                    fileFallbackProject.Id,
+                    "Autodesk MotionBuilder 2026.1",
+                    "motionbuilder-smoke-app");
                 var currentEntry = await _store.StartTimerAsync(
                     currentProject.Id,
                     TrackingSource.Manual,
@@ -263,6 +272,7 @@ public partial class App : System.Windows.Application
                 recognitionSwitchCurrentProjectId = currentProject.Id;
                 recognitionSwitchTargetProjectId = targetProject.Id;
                 recognitionSwitchTargetTaskId = targetTask.Id;
+                recognitionFileFallbackProjectId = fileFallbackProject.Id;
             }
 
             // Observe short inactive intervals so they can be combined into the
@@ -477,6 +487,8 @@ public partial class App : System.Windows.Application
                         ?? throw new InvalidOperationException("The target recognition project was not seeded.");
                     var targetTaskId = recognitionSwitchTargetTaskId
                         ?? throw new InvalidOperationException("The target recognition task was not seeded.");
+                    var fileFallbackProjectId = recognitionFileFallbackProjectId
+                        ?? throw new InvalidOperationException("The filename fallback project was not seeded.");
                     var currentEntryId = recognitionSwitchCurrentEntryId
                         ?? throw new InvalidOperationException("The current recognition entry was not seeded.");
 
@@ -571,6 +583,57 @@ public partial class App : System.Windows.Application
                     }
 
                     _detailsWindow?.CloseWithoutSaving();
+                    await _controller.StopTimerAsync();
+                    _detailsWindow?.CloseWithoutSaving();
+
+                    var fileFallbackProject = (await _store.GetProjectOptionsAsync())
+                        .Single(project => project.ProjectId == fileFallbackProjectId);
+                    var filenameReminder = new ReminderWindow(
+                        fileFallbackProject.ClientName,
+                        fileFallbackProject.ProjectName,
+                        fileFallbackProject.Color,
+                        await _store.GetTasksAsync(fileFallbackProjectId),
+                        [],
+                        await _store.GetTagsAsync(),
+                        suggestedTaskName: "Boulder Walk F")
+                    {
+                        Owner = _mainWindow,
+                    };
+                    filenameReminder.Show();
+                    await Task.Delay(100);
+                    if (filenameReminder.SelectedTaskId is not null ||
+                        !string.Equals(
+                            filenameReminder.TaskName,
+                            "Boulder Walk F",
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "The recognition popup did not prefill the filename fallback as an editable task.");
+                    }
+
+                    filenameReminder.StartForPreview();
+                    var filenameEntry = await _controller.StartRecognizedTimerForPreviewAsync(
+                        fileFallbackProjectId,
+                        new ReminderResponse(
+                            ReminderResult.Started,
+                            [],
+                            filenameReminder.SelectedTaskId,
+                            filenameReminder.TaskName));
+                    var filenameTask = (await _store.GetTasksAsync(fileFallbackProjectId))
+                        .SingleOrDefault(task => string.Equals(
+                            task.Name,
+                            "Boulder Walk F",
+                            StringComparison.OrdinalIgnoreCase));
+                    if (filenameEntry.ProjectId != fileFallbackProjectId ||
+                        filenameTask is null ||
+                        filenameTask.Origin != SavedTaskOrigin.Notification ||
+                        filenameEntry.TaskId != filenameTask.Id ||
+                        filenameEntry.Source != TrackingSource.WindowReminder)
+                    {
+                        throw new InvalidOperationException(
+                            "The filename fallback was not created and assigned as a notification task.");
+                    }
+
                     await _controller.StopTimerAsync();
                     _detailsWindow?.CloseWithoutSaving();
                 }

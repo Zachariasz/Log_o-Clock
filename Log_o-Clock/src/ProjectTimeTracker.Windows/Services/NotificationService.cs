@@ -19,6 +19,7 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
         IReadOnlyList<TagDefinition> availableTags,
         bool isProjectSwitch = false,
         Guid? suggestedTaskId = null,
+        string? suggestedTaskName = null,
         nint targetWindowHandle = default,
         CancellationToken cancellationToken = default)
     {
@@ -37,6 +38,7 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
                 availableTags,
                 isProjectSwitch,
                 suggestedTaskId,
+                suggestedTaskName,
                 targetWindowHandle);
             _active = window;
             window.Closed += (_, _) =>

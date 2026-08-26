@@ -9,6 +9,7 @@ pushd "%ROOT%" >nul || (
 
 set "LAST_VERSION=unknown"
 for /f "usebackq delims=" %%A in (`powershell.exe -NoProfile -Command "$xml = [xml](Get-Content -LiteralPath 'Directory.Build.props' -Raw); $xml.Project.PropertyGroup.Version"`) do set "LAST_VERSION=%%A"
+for /f "usebackq delims=" %%A in (`powershell.exe -NoProfile -Command "$latest = Get-ChildItem -LiteralPath 'outputs' -Directory -Filter 'LogOClock-*-win-x64' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1; if ($latest -and $latest.Name -match '^LogOClock-(\d+\.\d+\.\d+)-win-x64$') { $Matches[1] }"`) do set "LAST_VERSION=%%A"
 
 set "APP_VERSION="
 set /p "APP_VERSION=New version number (current: %LAST_VERSION%; for example 1.143.0): "

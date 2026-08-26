@@ -1744,7 +1744,21 @@ public sealed class AppController : IAsyncDisposable
         var projectTasks = await _store.GetTasksAsync(
             candidate.Project.Id,
             cancellationToken: cancellationToken);
-        var suggestedTask = _taskTitleMatcher.Match(windowTitle, projectTasks);
+        var taskSuggestion = _taskTitleMatcher.Suggest(windowTitle, projectTasks);
+        if (taskSuggestion.ShouldCorrectSavedTaskName &&
+            taskSuggestion.SavedTask is { } savedTask &&
+            taskSuggestion.FileTaskName is { } fileTaskName &&
+            !projectTasks.Any(task =>
+                task.Id != savedTask.Id &&
+                string.Equals(task.Name, fileTaskName, StringComparison.OrdinalIgnoreCase)))
+        {
+            await _store.RenameTaskAsync(savedTask.Id, fileTaskName, cancellationToken);
+            var correctedTask = savedTask with { Name = fileTaskName };
+            projectTasks = projectTasks
+                .Select(task => task.Id == correctedTask.Id ? correctedTask : task)
+                .ToArray();
+            taskSuggestion = taskSuggestion with { SavedTask = correctedTask };
+        }
         var correlatedTags = await _store.GetSoftwareTagsByProcessAsync(
             candidate.Project.Id,
             processName,
@@ -1756,7 +1770,8 @@ public sealed class AppController : IAsyncDisposable
             correlatedTags,
             availableTags,
             isProjectSwitch: isProjectSwitch,
-            suggestedTaskId: suggestedTask?.Id,
+            suggestedTaskId: taskSuggestion.SavedTask?.Id,
+            suggestedTaskName: taskSuggestion.TaskName,
             targetWindowHandle: targetWindowHandle,
             cancellationToken: cancellationToken);
         if (response.Result == ReminderResult.Snoozed)

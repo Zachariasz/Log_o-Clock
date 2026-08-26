@@ -44,6 +44,7 @@ public interface INotificationService : IDisposable
         IReadOnlyList<TagDefinition> availableTags,
         bool isProjectSwitch = false,
         Guid? suggestedTaskId = null,
+        string? suggestedTaskName = null,
         nint targetWindowHandle = default,
         CancellationToken cancellationToken = default);
 

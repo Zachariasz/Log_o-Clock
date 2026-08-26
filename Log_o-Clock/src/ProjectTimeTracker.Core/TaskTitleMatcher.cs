@@ -2,8 +2,32 @@ using System.Text;
 
 namespace ProjectTimeTracker.Core;
 
+public sealed record TaskTitleSuggestion(
+    SavedTask? SavedTask,
+    string? TaskName,
+    string? FileTaskName = null)
+{
+    public bool ShouldCorrectSavedTaskName =>
+        SavedTask is { IsTrelloLinked: false } savedTask &&
+        FileTaskName is { } fileTaskName &&
+        string.Equals(
+            string.Concat(savedTask.Name.Where(character => !char.IsWhiteSpace(character))),
+            string.Concat(fileTaskName.Where(character => !char.IsWhiteSpace(character))),
+            StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(savedTask.Name, fileTaskName, StringComparison.Ordinal);
+}
+
 public sealed class TaskTitleMatcher
 {
+    public TaskTitleSuggestion Suggest(string windowTitle, IReadOnlyList<SavedTask> projectTasks)
+    {
+        var savedTask = Match(windowTitle, projectTasks);
+        var fileTaskName = ExtractFileTaskName(windowTitle);
+        return savedTask is not null
+            ? new TaskTitleSuggestion(savedTask, null, fileTaskName)
+            : new TaskTitleSuggestion(null, fileTaskName, fileTaskName);
+    }
+
     public SavedTask? Match(string windowTitle, IReadOnlyList<SavedTask> projectTasks)
     {
         ArgumentNullException.ThrowIfNull(windowTitle);
@@ -44,6 +68,45 @@ public sealed class TaskTitleMatcher
             .Take(2)
             .ToArray();
         return bestMatches.Length == 1 ? bestMatches[0] : null;
+    }
+
+    private static string? ExtractFileTaskName(string windowTitle)
+    {
+        var finalDirectorySeparator = windowTitle.LastIndexOfAny(['\\', '/']);
+        if (finalDirectorySeparator < 0 ||
+            finalDirectorySeparator == windowTitle.Length - 1)
+        {
+            return null;
+        }
+
+        var fileName = windowTitle[(finalDirectorySeparator + 1)..].Trim();
+        var extension = Path.GetExtension(fileName);
+        if (extension.Length <= 1)
+        {
+            return null;
+        }
+
+        var taskName = AddCamelCaseSpacing(Path.GetFileNameWithoutExtension(fileName).Trim());
+        return string.IsNullOrWhiteSpace(taskName) ? null : taskName;
+    }
+
+    private static string AddCamelCaseSpacing(string value)
+    {
+        var formatted = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            var character = value[index];
+            if (index > 0 &&
+                char.IsLower(value[index - 1]) &&
+                char.IsUpper(character))
+            {
+                formatted.Append(' ');
+            }
+
+            formatted.Append(character);
+        }
+
+        return formatted.ToString();
     }
 
     private static bool IsMatch(TitleParts title, TitleParts task) =>

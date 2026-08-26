@@ -80,6 +80,74 @@ public sealed class TaskTitleMatcherTests
         Assert.Null(match);
     }
 
+    [Fact]
+    public void SuggestsFileNameWhenNoSavedTaskMatchesWindowTitle()
+    {
+        var suggestion = _matcher.Suggest(
+            "Autodesk MotionBuilder 2026.1 - G:\\Mój dysk\\Projects\\GameDev\\TheHighlandKeep\\Humanoid\\BoulderSet\\BoulderWalkF\\BoulderWalkF.fbx",
+            []);
+
+        Assert.Null(suggestion.SavedTask);
+        Assert.Equal("Boulder Walk F", suggestion.TaskName);
+    }
+
+    [Fact]
+    public void SuggestionRemovesOnlyFinalFileExtension()
+    {
+        var suggestion = _matcher.Suggest("Blender - C:\\shots\\BoulderWalkF.v002.fbx", []);
+
+        Assert.Equal("Boulder Walk F.v002", suggestion.TaskName);
+    }
+
+    [Fact]
+    public void SuggestionDoesNotTreatOrdinaryApplicationTitleAsAFile()
+    {
+        var suggestion = _matcher.Suggest("Autodesk MotionBuilder 2026.1", []);
+
+        Assert.Null(suggestion.SavedTask);
+        Assert.Null(suggestion.TaskName);
+    }
+
+    [Fact]
+    public void SavedTaskMatchTakesPriorityOverFileNameFallback()
+    {
+        var matchedTask = Task("BoulderWalkF");
+
+        var suggestion = _matcher.Suggest(
+            "Autodesk MotionBuilder - G:\\Projects\\BoulderWalkF.fbx",
+            [matchedTask]);
+
+        Assert.Equal(matchedTask.Id, suggestion.SavedTask?.Id);
+        Assert.Null(suggestion.TaskName);
+        Assert.Equal("Boulder Walk F", suggestion.FileTaskName);
+    }
+
+    [Fact]
+    public void LocalSavedTaskWithOldSpacingIsMarkedForInPlaceCorrection()
+    {
+        var existingTask = Task("Boulder WalkF");
+
+        var suggestion = _matcher.Suggest(
+            "Autodesk MotionBuilder 2026.1 - G:\\Mój dysk\\Projects\\GameDev\\TheHighlandKeep\\Humanoid\\BoulderSet\\BoulderWalkF\\BoulderWalkF.fbx",
+            [existingTask]);
+
+        Assert.Equal(existingTask.Id, suggestion.SavedTask?.Id);
+        Assert.Equal("Boulder Walk F", suggestion.FileTaskName);
+        Assert.True(suggestion.ShouldCorrectSavedTaskName);
+    }
+
+    [Fact]
+    public void AmbiguousSavedTaskMatchFallsBackToFileName()
+    {
+        var first = Task("Shot-010");
+        var second = Task("Shot 010");
+
+        var suggestion = _matcher.Suggest("MotionBuilder - G:\\Projects\\Shot_010.fbx", [first, second]);
+
+        Assert.Null(suggestion.SavedTask);
+        Assert.Equal("Shot_010", suggestion.TaskName);
+    }
+
     private static SavedTask Task(string name, bool isArchived = false) =>
         new(Guid.NewGuid(), Guid.NewGuid(), name, isArchived);
 }

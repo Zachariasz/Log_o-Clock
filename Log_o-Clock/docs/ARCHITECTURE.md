@@ -127,7 +127,7 @@ flowchart LR
     Reminder --> Start["start or atomically switch timer"]
 ```
 
-Recognition candidates come only from enabled rules attached to active, unfrozen clients/projects. Freezing a project temporarily disables its rules and preserves their prior enabled states for restoration when the project is unfrozen. Rule title comparison is case-insensitive; optional process comparison removes `.exe`. Longest title phrase wins. Task matching ignores delimiters and recognizes word/camel-case boundaries, but only fills one unambiguous best match.
+Recognition candidates come only from enabled rules attached to active, unfrozen clients/projects. Freezing a project temporarily disables its rules and preserves their prior enabled states for restoration when the project is unfrozen. Rule title comparison is case-insensitive; optional process comparison removes `.exe`. Longest title phrase wins. Task matching ignores delimiters and recognizes word/camel-case boundaries, preferring one unambiguous best saved-task match. If none is recognized, a path-like title with a file extension supplies the basename as editable task text; camel-case boundaries are converted to spaces. Accepting the reminder creates or reuses that task. Whitespace-only corrections to an already matched non-Trello task are renamed in place so its identity and history are retained.
 
 The reminder service owns one active recognition popup. `Gimme break!` snoozes recognition for five minutes. A task typed in a reminder or its automatic details popup is marked notification-created; the store removes it if no entry retains it. Ordinary startup deliberately does not treat the already-focused window as a new recognition visit.
 

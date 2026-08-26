@@ -56,6 +56,7 @@ public partial class ReminderWindow : Window
         IReadOnlyList<TagDefinition> availableTags,
         bool isProjectSwitch = false,
         Guid? suggestedTaskId = null,
+        string? suggestedTaskName = null,
         nint targetWindowHandle = default)
     {
         InitializeComponent();
@@ -86,9 +87,11 @@ public partial class ReminderWindow : Window
         else
         {
             // A project-only recognition must never borrow an old task value.
+            // A filename fallback remains unselected editable text so it is
+            // created only if the recognition reminder is accepted.
             TaskCombo.SelectedItem = null;
             TaskCombo.SelectedIndex = -1;
-            TaskCombo.Text = string.Empty;
+            TaskCombo.Text = suggestedTaskName?.Trim() ?? string.Empty;
         }
 
         DescriptionText.SetTagDefinitions(availableTags);
