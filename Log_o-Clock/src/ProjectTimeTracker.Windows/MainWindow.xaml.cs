@@ -692,6 +692,19 @@ public partial class MainWindow : Window
                 "The Settings break reminder position did not apply and persist.");
         }
 
+        BreakReminderBathroomMessageCheck.IsChecked = false;
+        await Task.Delay(100);
+        if (BreakReminderSettings.ParseEnabledMessageIds(
+                await _store.GetSettingAsync(BreakReminderSettings.EnabledMessageIdsKey))
+            .Contains("bathroom"))
+        {
+            throw new InvalidOperationException(
+                "The Settings break reminder message list did not persist a disabled message.");
+        }
+
+        BreakReminderBathroomMessageCheck.IsChecked = true;
+        await Task.Delay(100);
+
         BreakReminderMinutesText.Text =
             BreakReminderSettings.DefaultIntervalMinutes.ToString(CultureInfo.CurrentCulture);
         await ApplyBreakReminderMinutesAsync();
@@ -879,7 +892,12 @@ public partial class MainWindow : Window
             SettingsCategoryTabs, RecognitionCheck, SessionBehaviorCombo, SessionBehaviorDescriptionText,
             RecentEntryResumeMinutesText, RecentEntryResumeValidationText,
             BreakReminderMinutesText, BreakReminderValidationText,
-            BreakReminderBottomRight, BreakReminderScreenCenter,
+            BreakReminderBottomRight, BreakReminderScreenCenter, BreakReminderMessagesPanel,
+            BreakReminderBathroomMessageCheck, BreakReminderBreakMessageCheck,
+            BreakReminderCoffeeMessageCheck, BreakReminderTeaMessageCheck,
+            BreakReminderSnackMessageCheck, BreakReminderStandUpMessageCheck,
+            BreakReminderLaundryMessageCheck, BreakReminderDinnerMessageCheck,
+            BreakReminderEpisodeMessageCheck,
             CallsIdleProtectionCheck, VideoIdleProtectionCheck,
             IdleProtectionStatusText, IdleProtectionStatusDot, IdleProtectionPrivacyText,
             ExcludedSoftwareReviewMinutesText, ExcludedSoftwareReviewValidationText,
@@ -3044,6 +3062,7 @@ public partial class MainWindow : Window
         BreakReminderMinutesText.Text =
             _controller.BreakReminderIntervalMinutes.ToString(CultureInfo.CurrentCulture);
         SetBreakReminderPlacementControls(_controller.BreakReminderPlacement);
+        SetBreakReminderMessageControls(_controller.BreakReminderEnabledMessageIds);
         ExcludedSoftwareReviewMinutesText.Text =
             _controller.ExcludedSoftwareReviewMinimumMinutes.ToString(CultureInfo.CurrentCulture);
         AccumulatedAwayReviewMinutesText.Text =
@@ -8860,6 +8879,57 @@ public partial class MainWindow : Window
                 : null;
         return Enum.TryParse(value, ignoreCase: true, out placement) &&
                Enum.IsDefined(placement);
+    }
+
+    private async void BreakReminderMessage_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading)
+        {
+            return;
+        }
+
+        var enabledMessageIds = GetBreakReminderMessageCheckBoxes()
+            .Where(checkBox => checkBox.IsChecked == true)
+            .Select(checkBox => checkBox.Tag as string)
+            .OfType<string>()
+            .ToArray();
+        if (_controller.BreakReminderEnabledMessageIds.SetEquals(enabledMessageIds))
+        {
+            return;
+        }
+
+        try
+        {
+            await _controller.SetBreakReminderEnabledMessageIdsAsync(enabledMessageIds);
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not update break reminder messages", exception);
+            SetBreakReminderMessageControls(_controller.BreakReminderEnabledMessageIds);
+        }
+    }
+
+    private IEnumerable<CheckBox> GetBreakReminderMessageCheckBoxes()
+    {
+        yield return BreakReminderBathroomMessageCheck;
+        yield return BreakReminderBreakMessageCheck;
+        yield return BreakReminderCoffeeMessageCheck;
+        yield return BreakReminderTeaMessageCheck;
+        yield return BreakReminderSnackMessageCheck;
+        yield return BreakReminderStandUpMessageCheck;
+        yield return BreakReminderLaundryMessageCheck;
+        yield return BreakReminderDinnerMessageCheck;
+        yield return BreakReminderEpisodeMessageCheck;
+    }
+
+    private void SetBreakReminderMessageControls(IReadOnlySet<string> enabledMessageIds)
+    {
+        foreach (var checkBox in GetBreakReminderMessageCheckBoxes())
+        {
+            checkBox.IsChecked = checkBox.Tag is string id && enabledMessageIds.Contains(id);
+        }
     }
 
     private async void ExcludedSoftwareReviewMinutesText_PreviewKeyDown(

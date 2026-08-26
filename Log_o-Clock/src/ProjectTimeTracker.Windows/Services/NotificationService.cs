@@ -123,6 +123,7 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
 
     public async Task ShowBreakReminderAsync(
         BreakReminderPlacement placement,
+        string message,
         CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -134,7 +135,7 @@ public sealed class NotificationService(Dispatcher dispatcher) : INotificationSe
         await dispatcher.InvokeAsync(() =>
         {
             _breakReminder?.Close();
-            var window = new BreakReminderWindow(placement);
+            var window = new BreakReminderWindow(placement, message);
             _breakReminder = window;
             window.Closed += (_, _) =>
             {

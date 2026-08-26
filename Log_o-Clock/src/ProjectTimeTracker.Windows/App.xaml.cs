@@ -345,6 +345,7 @@ public partial class App : System.Windows.Application
                 StartUnassignedFromTray,
                 StartFromTray,
                 StopFromTray,
+                CancelFromTray,
                 RequestExit);
             await RefreshRunningLabelAsync();
             await RefreshTrayProjectsAsync();
@@ -2828,6 +2829,47 @@ public partial class App : System.Windows.Application
                     }
 
                     _detailsWindow?.CloseWithoutSaving();
+
+                    await _controller.StartTimerAsync(project.Id, TrackingSource.Manual, showDetails: false);
+                    var cancelledEntryId = _controller.RunningEntry?.Id
+                        ?? throw new InvalidOperationException(
+                            "The tray cancellation check did not start a timer.");
+                    var tray = _tray
+                        ?? throw new InvalidOperationException("The tray was not available for cancellation.");
+                    tray.SingleLeftClickForPreview();
+                    for (var attempt = 0; attempt < 50 && _detailsWindow?.IsLoaded != true; attempt++)
+                    {
+                        await Task.Delay(100);
+                    }
+
+                    if (_detailsWindow?.IsLoaded != true ||
+                        !tray.IsCancelCurrentSessionEnabledForPreview)
+                    {
+                        throw new InvalidOperationException(
+                            "The tray cancellation action was not available while tracking.");
+                    }
+
+                    tray.CancelCurrentSessionForPreview();
+                    for (var attempt = 0; attempt < 50 &&
+                         (_controller.RunningEntry is not null ||
+                          await _store.GetTimeEntryAsync(cancelledEntryId) is not null ||
+                          _detailsWindow?.IsLoaded == true); attempt++)
+                    {
+                        await Task.Delay(100);
+                    }
+
+                    if (_controller.RunningEntry is not null ||
+                        await _store.GetTimeEntryAsync(cancelledEntryId) is not null ||
+                        _detailsWindow?.IsLoaded == true ||
+                        tray.IsCancelCurrentSessionEnabledForPreview ||
+                        !string.Equals(
+                            tray.CurrentTooltipForPreview,
+                            "Log O'clock - idle",
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            "Cancel current tracking session did not discard the timer and return the tray to idle.");
+                    }
                 }
 
                 if (string.Equals(
@@ -4346,7 +4388,7 @@ public partial class App : System.Windows.Application
                                      BreakReminderPlacement.ScreenCenter,
                                  })
                         {
-                            var reminder = new BreakReminderWindow(placement);
+                            var reminder = new BreakReminderWindow(placement, "Take a break!");
                             reminder.Show();
                             await Task.Delay(150);
                             reminder.UpdateLayout();
@@ -4731,6 +4773,14 @@ public partial class App : System.Windows.Application
         if (_controller?.RunningEntry is not null)
         {
             await _controller.StopTimerAsync();
+        }
+    }
+
+    private async void CancelFromTray()
+    {
+        if (_controller?.RunningEntry is not null)
+        {
+            await _controller.CancelRunningTimerAsync();
         }
     }
 

@@ -3449,6 +3449,32 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         return running with { EndUtc = nowUtc, LastCheckpointUtc = nowUtc, DetailsPending = pending, ModifiedUtc = nowUtc };
     }
 
+    public async Task<bool> CancelRunningTimerAsync(
+        Guid entryId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        int deleted;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM TimeEntries WHERE Id = $id AND EndUtc IS NULL;";
+            command.Parameters.AddWithValue("$id", entryId.ToString("D"));
+            deleted = await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
+        transaction.Commit();
+        await connection.CloseAsync();
+
+        if (deleted > 0)
+        {
+            await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+        }
+
+        return deleted > 0;
+    }
+
     public Task CheckpointRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default) =>
         ExecuteParameterizedAsync(
             "UPDATE TimeEntries SET LastCheckpointUtc = $now WHERE EndUtc IS NULL;",

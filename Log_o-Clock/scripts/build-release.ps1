@@ -46,6 +46,9 @@ if ($LASTEXITCODE -ne 0) { throw "Runtime-pack restore failed." }
     -p:EnableCompressionInSingleFile=true `
     -p:DebugType=embedded `
     -p:DebugSymbols=false `
+    -p:Version=$AppVersion `
+    -p:AssemblyVersion=$AppVersion.0 `
+    -p:FileVersion=$AppVersion.0 `
     -p:BuildInParallel=false `
     -p:UseSharedCompilation=false `
     -nodeReuse:false `

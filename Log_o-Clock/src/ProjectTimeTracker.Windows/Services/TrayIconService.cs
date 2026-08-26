@@ -13,6 +13,7 @@ public sealed class TrayIconService : IDisposable
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _startTimerItem;
     private readonly ToolStripMenuItem _stopTimerItem;
+    private readonly ToolStripMenuItem _cancelTimerItem;
     private readonly ToolStripMenuItem _remoteTimersItem;
     private readonly System.Windows.Forms.Timer _singleClickTimer;
     private readonly Action _singleClick;
@@ -27,6 +28,7 @@ public sealed class TrayIconService : IDisposable
         Action startUnassigned,
         Action<Guid> start,
         Action stop,
+        Action cancel,
         Action exit)
     {
         _singleClick = singleClick;
@@ -60,6 +62,11 @@ public sealed class TrayIconService : IDisposable
             Enabled = false,
         };
         _menu.Items.Add(_stopTimerItem);
+        _cancelTimerItem = new ToolStripMenuItem("Cancel current timer", null, (_, _) => cancel())
+        {
+            Enabled = false,
+        };
+        _menu.Items.Add(_cancelTimerItem);
         _remoteTimersItem = new ToolStripMenuItem("Other computers")
         {
             Enabled = false,
@@ -98,6 +105,7 @@ public sealed class TrayIconService : IDisposable
         _notifyIcon.Icon = running ? _runningIcon : _idleIcon;
         _notifyIcon.Text = tooltip.Length <= 63 ? tooltip : tooltip[..63];
         _stopTimerItem.Enabled = running;
+        _cancelTimerItem.Enabled = running;
     }
 
     public void SetProjects(IReadOnlyList<ProjectOption> projects)
@@ -165,6 +173,10 @@ public sealed class TrayIconService : IDisposable
     }
 
     internal void StartUnassignedForPreview() => _startUnassigned();
+
+    internal void CancelCurrentSessionForPreview() => _cancelTimerItem.PerformClick();
+
+    internal bool IsCancelCurrentSessionEnabledForPreview => _cancelTimerItem.Enabled;
 
     internal void SingleLeftClickForPreview() => QueueSingleClick();
 

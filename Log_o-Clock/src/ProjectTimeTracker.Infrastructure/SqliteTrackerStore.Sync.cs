@@ -1325,6 +1325,7 @@ public sealed partial class SqliteTrackerStore
             string.Equals(key, SessionTrackingSettings.ResumeMarkerKey, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, SessionTrackingSettings.ReviewEntryKey, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, AccumulatedAwayReviewSettings.DailyStateKey, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, BreakReminderSettings.DailyUsageKey, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(key, TargetReviewSettings.LastShownDateKey, StringComparison.OrdinalIgnoreCase))
         {
             return false;

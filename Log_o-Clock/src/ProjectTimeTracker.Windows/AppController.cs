@@ -63,6 +63,9 @@ public sealed class AppController : IAsyncDisposable
     private long _breakReminderEntryBaselineSeconds;
     private long _breakReminderLastShownInterval;
     private Guid? _breakReminderEntryId;
+    private IReadOnlySet<string> _breakReminderEnabledMessageIds =
+        BreakReminderSettings.Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+    private BreakReminderDailyUsage _breakReminderDailyUsage = new(DateOnly.MinValue, []);
 
     public AppController(
         ITrackerStore store,
@@ -130,6 +133,7 @@ public sealed class AppController : IAsyncDisposable
         BreakReminderSettings.DefaultIntervalMinutes;
     public BreakReminderPlacement BreakReminderPlacement { get; private set; } =
         BreakReminderSettings.DefaultPlacement;
+    public IReadOnlySet<string> BreakReminderEnabledMessageIds => _breakReminderEnabledMessageIds;
     public DateTimeOffset UtcNow => _clock.UtcNow;
     public TimeSpan RunningElapsed
     {
@@ -192,6 +196,7 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(BreakReminderSettings.IntervalMinutesKey, cancellationToken));
         BreakReminderPlacement = BreakReminderSettings.ParsePlacement(
             await _store.GetSettingAsync(BreakReminderSettings.PlacementKey, cancellationToken));
+        await ReloadBreakReminderMessagesAsync(cancellationToken);
         ResetBreakReminderStreak();
         var sessionBehaviorValue = await _store.GetSettingAsync(
             SessionTrackingSettings.BehaviorKey,
@@ -299,6 +304,7 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(BreakReminderSettings.IntervalMinutesKey, cancellationToken));
         BreakReminderPlacement = BreakReminderSettings.ParsePlacement(
             await _store.GetSettingAsync(BreakReminderSettings.PlacementKey, cancellationToken));
+        await ReloadBreakReminderMessagesAsync(cancellationToken);
         var sessionBehaviorValue = await _store.GetSettingAsync(
             SessionTrackingSettings.BehaviorKey,
             cancellationToken);
@@ -503,6 +509,18 @@ public sealed class AppController : IAsyncDisposable
             BreakReminderSettings.PlacementKey,
             placement.ToString(),
             cancellationToken);
+    }
+
+    public async Task SetBreakReminderEnabledMessageIdsAsync(
+        IEnumerable<string> messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedIds = BreakReminderSettings.NormalizeEnabledMessageIds(messageIds);
+        await _store.SetSettingAsync(
+            BreakReminderSettings.EnabledMessageIdsKey,
+            BreakReminderSettings.SerializeEnabledMessageIds(normalizedIds),
+            cancellationToken);
+        _breakReminderEnabledMessageIds = normalizedIds;
     }
 
     public async Task ShowPendingSessionNotificationAsync(
@@ -871,6 +889,35 @@ public sealed class AppController : IAsyncDisposable
         }
 
         return stopped;
+    }
+
+    public async Task<bool> CancelRunningTimerAsync(CancellationToken cancellationToken = default)
+    {
+        if (RunningEntry is not { } runningEntry ||
+            !await _store.CancelRunningTimerAsync(runningEntry.Id, cancellationToken))
+        {
+            return false;
+        }
+
+        if (_idleCandidate?.EntryId == runningEntry.Id)
+        {
+            _idleCandidate = null;
+        }
+
+        if (_accumulatedAwayReview is { } accumulatedAwayReview)
+        {
+            accumulatedAwayReview.PendingIntervals.RemoveAll(
+                interval => interval.EntryId == runningEntry.Id);
+            await PersistAccumulatedAwayReviewAsync(cancellationToken);
+        }
+
+        ResetExcludedSoftwareTracking();
+        RunningEntry = null;
+        RunningExcludedSeconds = 0;
+        ResetBreakReminderStreak();
+        RunningEntryChanged?.Invoke(this, null);
+        DataChanged?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     public async Task StopForShutdownAsync(CancellationToken cancellationToken = default)
@@ -2524,8 +2571,28 @@ public sealed class AppController : IAsyncDisposable
                 return;
             }
 
+            var today = GetLocalDate(_clock.UtcNow);
+            _breakReminderDailyUsage = _breakReminderDailyUsage.LocalDate == today
+                ? _breakReminderDailyUsage
+                : BreakReminderSettings.ParseDailyUsage(
+                    await _store.GetSettingAsync(BreakReminderSettings.DailyUsageKey),
+                    today);
+            var message = BreakReminderSettings.SelectMessage(
+                _breakReminderEnabledMessageIds,
+                _breakReminderDailyUsage,
+                _clock.UtcNow);
+            if (message is null)
+            {
+                return;
+            }
+
             _breakReminderLastShownInterval = completedIntervals;
-            await _notificationService.ShowBreakReminderAsync(BreakReminderPlacement);
+            await _notificationService.ShowBreakReminderAsync(BreakReminderPlacement, message.Text);
+            _breakReminderDailyUsage.Counts[message.Id] =
+                _breakReminderDailyUsage.Counts.GetValueOrDefault(message.Id) + 1;
+            await _store.SetSettingAsync(
+                BreakReminderSettings.DailyUsageKey,
+                BreakReminderSettings.SerializeDailyUsage(_breakReminderDailyUsage));
         }
         catch (Exception exception)
         {
@@ -2544,6 +2611,15 @@ public sealed class AppController : IAsyncDisposable
         _breakReminderEntryId = null;
         _breakReminderEntryBaselineSeconds = 0;
         BeginBreakReminderEntry();
+    }
+
+    private async Task ReloadBreakReminderMessagesAsync(CancellationToken cancellationToken)
+    {
+        _breakReminderEnabledMessageIds = BreakReminderSettings.ParseEnabledMessageIds(
+            await _store.GetSettingAsync(BreakReminderSettings.EnabledMessageIdsKey, cancellationToken));
+        _breakReminderDailyUsage = BreakReminderSettings.ParseDailyUsage(
+            await _store.GetSettingAsync(BreakReminderSettings.DailyUsageKey, cancellationToken),
+            GetLocalDate(_clock.UtcNow));
     }
 
     private void BeginBreakReminderEntry()

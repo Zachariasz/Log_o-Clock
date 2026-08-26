@@ -822,6 +822,35 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CancellingRunningTimerDiscardsOnlyTheActiveEntryWithoutSyncDeletion()
+    {
+        var (project, _) = await CreateTwoProjectsAsync();
+        var start = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        await _store.AddManualEntryAsync(project.Id, null, "Keep this entry", start, start.AddHours(1));
+        var notificationTask = await _store.GetOrAddTaskAsync(
+            project.Id,
+            "Cancelled notification task",
+            SavedTaskOrigin.Notification);
+        var running = await _store.StartOrResumeTimerAsync(
+            project.Id,
+            notificationTask.Id,
+            description: null,
+            source: TrackingSource.WindowReminder,
+            nowUtc: start.AddHours(2),
+            maximumGap: TimeSpan.Zero);
+
+        Assert.True(await _store.CancelRunningTimerAsync(running.Entry.Id));
+        Assert.Null(await _store.GetRunningEntryAsync());
+        Assert.Null(await _store.GetTimeEntryAsync(running.Entry.Id));
+        Assert.Empty(await _store.GetGoogleSheetsEntryDeletionIdsAsync());
+        Assert.False(await _store.CancelRunningTimerAsync(running.Entry.Id));
+        Assert.DoesNotContain(await _store.GetTasksAsync(project.Id), task => task.Id == notificationTask.Id);
+
+        var retained = await _store.GetEntriesAsync(start.AddMinutes(-1), start.AddHours(3));
+        Assert.Single(retained, entry => entry.Description == "Keep this entry");
+    }
+
+    [Fact]
     public async Task ManualAndEditedEntriesShorterThanOneMinuteAreDiscarded()
     {
         var (project, _) = await CreateTwoProjectsAsync();

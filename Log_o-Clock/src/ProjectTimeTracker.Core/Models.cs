@@ -709,14 +709,45 @@ public enum BreakReminderPlacement
     ScreenCenter,
 }
 
+public sealed record BreakReminderMessage(
+    string Id,
+    string Text,
+    int? AvailableFromHour = null,
+    int? AvailableUntilHour = null)
+{
+    public bool IsAvailableAt(DateTimeOffset utcNow)
+    {
+        var hour = utcNow.ToLocalTime().Hour;
+        return (!AvailableFromHour.HasValue || hour >= AvailableFromHour.Value) &&
+               (!AvailableUntilHour.HasValue || hour < AvailableUntilHour.Value);
+    }
+}
+
+public sealed record BreakReminderDailyUsage(DateOnly LocalDate, Dictionary<string, int> Counts);
+
 public static class BreakReminderSettings
 {
     public const string IntervalMinutesKey = "break-reminder.interval-minutes";
     public const string PlacementKey = "break-reminder.placement";
+    public const string EnabledMessageIdsKey = "break-reminder.enabled-message-ids";
+    public const string DailyUsageKey = "break-reminder.daily-usage";
     public const int DefaultIntervalMinutes = 120;
     public const int MinimumAllowedMinutes = 1;
     public const int MaximumAllowedMinutes = 1_440;
     public const BreakReminderPlacement DefaultPlacement = BreakReminderPlacement.BottomRight;
+
+    public static IReadOnlyList<BreakReminderMessage> Messages { get; } =
+    [
+        new("bathroom", "you really need a bathroom"),
+        new("break", "breeeak !"),
+        new("coffee", "how about coffee?"),
+        new("tea", "Make a tea."),
+        new("snack", "snack time!"),
+        new("stand-up", "Just stand up and do something"),
+        new("laundry", "Do this fkn loundry!"),
+        new("dinner", "...dinner?", AvailableFromHour: 12, AvailableUntilHour: 18),
+        new("episode", "One episode...but short one!", AvailableFromHour: 10, AvailableUntilHour: 22),
+    ];
 
     public static int ParseIntervalMinutes(string? value) =>
         int.TryParse(
@@ -736,6 +767,91 @@ public static class BreakReminderSettings
 
     public static bool IsValidIntervalMinutes(int minutes) =>
         minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
+
+    public static IReadOnlySet<string> ParseEnabledMessageIds(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+        }
+
+        try
+        {
+            var storedIds = System.Text.Json.JsonSerializer.Deserialize<string[]>(value);
+            return storedIds is null
+                ? Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal)
+                : NormalizeEnabledMessageIds(storedIds);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+        }
+    }
+
+    public static IReadOnlySet<string> NormalizeEnabledMessageIds(IEnumerable<string> messageIds)
+    {
+        var knownIds = Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+        return messageIds
+            .Where(id => !string.IsNullOrWhiteSpace(id) && knownIds.Contains(id))
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    public static string SerializeEnabledMessageIds(IEnumerable<string> messageIds) =>
+        System.Text.Json.JsonSerializer.Serialize(
+            NormalizeEnabledMessageIds(messageIds).OrderBy(id => id, StringComparer.Ordinal));
+
+    public static BreakReminderDailyUsage ParseDailyUsage(string? value, DateOnly localDate)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return new BreakReminderDailyUsage(localDate, []);
+        }
+
+        try
+        {
+            var stored = System.Text.Json.JsonSerializer.Deserialize<BreakReminderDailyUsage>(value);
+            if (stored is null || stored.LocalDate != localDate || stored.Counts is null)
+            {
+                return new BreakReminderDailyUsage(localDate, []);
+            }
+
+            var knownIds = Messages.Select(message => message.Id).ToHashSet(StringComparer.Ordinal);
+            return new BreakReminderDailyUsage(
+                localDate,
+                stored.Counts
+                    .Where(pair => knownIds.Contains(pair.Key) && pair.Value > 0)
+                    .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new BreakReminderDailyUsage(localDate, []);
+        }
+    }
+
+    public static BreakReminderMessage? SelectMessage(
+        IReadOnlySet<string> enabledMessageIds,
+        BreakReminderDailyUsage dailyUsage,
+        DateTimeOffset utcNow,
+        Random? random = null)
+    {
+        var available = Messages
+            .Where(message => enabledMessageIds.Contains(message.Id) && message.IsAvailableAt(utcNow))
+            .ToArray();
+        if (available.Length == 0)
+        {
+            return null;
+        }
+
+        var fewestUses = available.Min(message =>
+            dailyUsage.Counts.GetValueOrDefault(message.Id));
+        var leastUsed = available
+            .Where(message => dailyUsage.Counts.GetValueOrDefault(message.Id) == fewestUses)
+            .ToArray();
+        return leastUsed[(random ?? Random.Shared).Next(leastUsed.Length)];
+    }
+
+    public static string SerializeDailyUsage(BreakReminderDailyUsage usage) =>
+        System.Text.Json.JsonSerializer.Serialize(usage);
 }
 
 public static class SidebarTargetsPanelSettings

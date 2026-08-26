@@ -2048,6 +2048,38 @@
                                      GroupName="BreakReminderPlacement" Style="{StaticResource TargetReviewChoiceStyle}"
                                      Checked="BreakReminderPlacement_Changed" />
                     </WrapPanel>
+                    <TextBlock Text="Messages" FontWeight="SemiBold" Margin="0,16,0,6" />
+                    <TextBlock Text="Choose the messages that can appear. The app chooses randomly among the least-used available messages each day."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,0,0,8" />
+                    <StackPanel x:Name="BreakReminderMessagesPanel">
+                        <CheckBox x:Name="BreakReminderBathroomMessageCheck" Tag="bathroom"
+                                  Content="you really need a bathroom" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderBreakMessageCheck" Tag="break"
+                                  Content="breeeak !" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderCoffeeMessageCheck" Tag="coffee"
+                                  Content="how about coffee?" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderTeaMessageCheck" Tag="tea"
+                                  Content="Make a tea." Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderSnackMessageCheck" Tag="snack"
+                                  Content="snack time!" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderStandUpMessageCheck" Tag="stand-up"
+                                  Content="Just stand up and do something" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderLaundryMessageCheck" Tag="laundry"
+                                  Content="Do this fkn loundry!" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderDinnerMessageCheck" Tag="dinner"
+                                  Content="...dinner? (12:00–18:00)" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                        <CheckBox x:Name="BreakReminderEpisodeMessageCheck" Tag="episode"
+                                  Content="One episode...but short one! (10:00–22:00)" Margin="0,0,0,6"
+                                  Checked="BreakReminderMessage_Changed" Unchecked="BreakReminderMessage_Changed" />
+                    </StackPanel>
                                 </StackPanel>
                             </ScrollViewer>
                         </TabItem>

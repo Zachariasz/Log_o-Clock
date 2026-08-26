@@ -57,6 +57,7 @@ public interface INotificationService : IDisposable
 
     Task ShowBreakReminderAsync(
         BreakReminderPlacement placement,
+        string message,
         CancellationToken cancellationToken = default);
 
     void DismissActive();
@@ -309,6 +310,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<TimeEntry> SplitRunningTimerAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default, bool? isCall = null);
     Task<TimeEntry> SwitchRunningTimerAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, TrackingSource source, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<TimeEntry?> StopRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
+    Task<bool> CancelRunningTimerAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task CheckpointRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<TimeEntry> UpdateRunningEntryStartAsync(Guid entryId, DateTimeOffset startUtc, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task UpdateEntryDetailsAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);

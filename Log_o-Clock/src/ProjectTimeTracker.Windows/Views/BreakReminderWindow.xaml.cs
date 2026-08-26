@@ -10,10 +10,11 @@ public partial class BreakReminderWindow : Window
     private readonly BreakReminderPlacement _placement;
     private readonly DispatcherTimer _dismissTimer;
 
-    public BreakReminderWindow(BreakReminderPlacement placement)
+    public BreakReminderWindow(BreakReminderPlacement placement, string message)
     {
         _placement = placement;
         InitializeComponent();
+        MessageText.Text = string.IsNullOrWhiteSpace(message) ? "Take a break!" : message;
         _dismissTimer = new DispatcherTimer(DispatcherPriority.Background, Dispatcher)
         {
             Interval = AutoDismissDelay,
@@ -23,6 +24,7 @@ public partial class BreakReminderWindow : Window
     }
 
     internal BreakReminderPlacement PlacementForPreview => _placement;
+    internal string MessageForPreview => MessageText.Text;
     internal bool IsDismissTimerRunningForPreview => _dismissTimer.IsEnabled;
 
     private void BreakReminderWindow_Loaded(object sender, RoutedEventArgs e)
