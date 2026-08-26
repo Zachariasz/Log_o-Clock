@@ -162,6 +162,10 @@ public partial class App : System.Windows.Application
                 Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_RECOGNITION_SWITCH"),
                 "true",
                 StringComparison.OrdinalIgnoreCase);
+            var verifyAutomaticRecognition = smokeTest && string.Equals(
+                Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATIC_RECOGNITION"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
             var verifySessionBehavior = smokeTest && string.Equals(
                 Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_SESSION_BEHAVIOR"),
                 "true",
@@ -171,6 +175,8 @@ public partial class App : System.Windows.Application
             Guid? recognitionSwitchTargetProjectId = null;
             Guid? recognitionSwitchTargetTaskId = null;
             Guid? recognitionFileFallbackProjectId = null;
+            Guid? automaticRecognitionFirstProjectId = null;
+            Guid? automaticRecognitionSecondProjectId = null;
             var startupSmokeActivity = verifyNoStartupPopup
                 ? new WindowActivity(
                     42,
@@ -178,9 +184,16 @@ public partial class App : System.Windows.Application
                     "startup-work-app",
                     DateTimeOffset.UtcNow)
                 : null;
-            var startupSmokeMonitor = startupSmokeActivity is null
+            var automaticRecognitionActivity = verifyAutomaticRecognition
+                ? new WindowActivity(
+                    142,
+                    "Automatic first project smoke window",
+                    "automatic-first-app",
+                    DateTimeOffset.UtcNow.AddMinutes(-5))
+                : null;
+            var startupSmokeMonitor = (startupSmokeActivity ?? automaticRecognitionActivity) is not { } fixedActivity
                 ? null
-                : new FixedForegroundActivityMonitor(startupSmokeActivity);
+                : new FixedForegroundActivityMonitor(fixedActivity);
             IForegroundActivityMonitor foreground = startupSmokeMonitor is not null
                 ? startupSmokeMonitor
                 : new ForegroundActivityMonitor();
@@ -273,6 +286,38 @@ public partial class App : System.Windows.Application
                 recognitionSwitchTargetProjectId = targetProject.Id;
                 recognitionSwitchTargetTaskId = targetTask.Id;
                 recognitionFileFallbackProjectId = fileFallbackProject.Id;
+            }
+
+            if (verifyAutomaticRecognition)
+            {
+                var client = await _store.AddClientAsync(
+                    $"Automatic recognition client {Guid.NewGuid():N}",
+                    "#766F80");
+                var firstProject = await _store.AddProjectAsync(
+                    client.Id,
+                    $"Automatic first project {Guid.NewGuid():N}",
+                    "#7B8495");
+                var secondProject = await _store.AddProjectAsync(
+                    client.Id,
+                    $"Automatic second project {Guid.NewGuid():N}",
+                    "#0D8F68");
+                await _store.AddRuleAsync(
+                    firstProject.Id,
+                    "Automatic first project smoke window",
+                    "automatic-first-app");
+                await _store.AddRuleAsync(
+                    firstProject.Id,
+                    "Automatic first alternate window",
+                    "automatic-first-alternate-app");
+                await _store.AddRuleAsync(
+                    secondProject.Id,
+                    "Automatic second project smoke window",
+                    "automatic-second-app");
+                await _store.SetSettingAsync("recognition.enabled", "true");
+                await _store.SetSettingAsync(AutomaticRecognitionSettings.EnabledKey, "true");
+                await _store.SetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, "1");
+                automaticRecognitionFirstProjectId = firstProject.Id;
+                automaticRecognitionSecondProjectId = secondProject.Id;
             }
 
             // Observe short inactive intervals so they can be combined into the
@@ -410,6 +455,96 @@ public partial class App : System.Windows.Application
                 if (verifyProfiles)
                 {
                     _mainWindow.VerifyProfilesForPreview();
+                }
+
+                if (verifyAutomaticRecognition)
+                {
+                    var firstProjectId = automaticRecognitionFirstProjectId
+                        ?? throw new InvalidOperationException("The first automatic-recognition project was not seeded.");
+                    var secondProjectId = automaticRecognitionSecondProjectId
+                        ?? throw new InvalidOperationException("The second automatic-recognition project was not seeded.");
+                    for (var attempt = 0;
+                         attempt < 30 && _controller.RunningEntry?.ProjectId != firstProjectId;
+                         attempt++)
+                    {
+                        await Task.Delay(100);
+                    }
+
+                    var firstEntry = _controller.RunningEntry
+                        ?? throw new InvalidOperationException(
+                            "Full automatic mode did not start the project already visible at startup.");
+                    if (firstEntry.ProjectId != firstProjectId ||
+                        firstEntry.Source != TrackingSource.WindowReminder ||
+                        Windows.OfType<ReminderWindow>().Any(window => window.IsVisible) ||
+                        Windows.OfType<ProjectChooserWindow>().Any(window => window.IsVisible))
+                    {
+                        throw new InvalidOperationException(
+                            "The automatic startup was not silent or did not use the recognition source.");
+                    }
+
+                    startupSmokeMonitor!.RaiseActivity(new WindowActivity(
+                        143,
+                        "Automatic first alternate window",
+                        "automatic-first-alternate-app",
+                        DateTimeOffset.UtcNow));
+                    await Task.Delay(750);
+                    await _controller.AdvanceAutomaticRecognitionForPreviewAsync(61);
+                    if (_controller.RunningEntry?.Id != firstEntry.Id)
+                    {
+                        throw new InvalidOperationException(
+                            "Switching software within the same recognized project split the timer.");
+                    }
+
+                    var switchBoundary = DateTimeOffset.UtcNow;
+                    startupSmokeMonitor.RaiseActivity(new WindowActivity(
+                        144,
+                        "Automatic second project smoke window C:\\Work\\BoulderWalkF.fbx",
+                        "automatic-second-app",
+                        switchBoundary));
+                    await Task.Delay(750);
+                    if (_controller.RunningEntry?.Id != firstEntry.Id)
+                    {
+                        throw new InvalidOperationException(
+                            "An automatic project switch committed before its grace period.");
+                    }
+
+                    await _controller.AdvanceAutomaticRecognitionForPreviewAsync(61);
+                    var secondEntry = _controller.RunningEntry
+                        ?? throw new InvalidOperationException(
+                            "The automatic project switch did not leave the recognized target running.");
+                    var stoppedFirst = await _store.GetTimeEntryAsync(firstEntry.Id);
+                    var fallbackTask = (await _store.GetTasksAsync(secondProjectId))
+                        .SingleOrDefault(task => string.Equals(
+                            task.Name,
+                            "Boulder Walk F",
+                            StringComparison.Ordinal));
+                    if (secondEntry.ProjectId != secondProjectId ||
+                        secondEntry.StartUtc != switchBoundary ||
+                        stoppedFirst?.EndUtc != switchBoundary ||
+                        fallbackTask is null ||
+                        fallbackTask.Origin != SavedTaskOrigin.Notification ||
+                        secondEntry.TaskId != fallbackTask.Id ||
+                        Windows.OfType<ReminderWindow>().Any(window => window.IsVisible) ||
+                        _detailsWindow?.IsVisible == true)
+                    {
+                        throw new InvalidOperationException(
+                            "The automatic switch did not preserve its boundary, inferred task, or silent workflow.");
+                    }
+
+                    startupSmokeMonitor.RaiseActivity(new WindowActivity(
+                        145,
+                        "Unrecognized automatic-mode window",
+                        "unknown-automatic-app",
+                        DateTimeOffset.UtcNow));
+                    await Task.Delay(750);
+                    await _controller.AdvanceAutomaticRecognitionForPreviewAsync(61);
+                    if (_controller.RunningEntry is not null)
+                    {
+                        throw new InvalidOperationException(
+                            "Automatic mode did not stop after the recognized project remained absent for the grace period.");
+                    }
+
+                    await _mainWindow.VerifyAutomaticRecognitionControlsForPreviewAsync();
                 }
 
                 if (verifySessionRecovery)

@@ -72,7 +72,9 @@ public sealed class BreakReminderSettingsTests
         int localHour,
         bool expected)
     {
-        var message = Assert.Single(BreakReminderSettings.Messages.Where(item => item.Id == messageId));
+        var message = Assert.Single(
+            BreakReminderSettings.Messages,
+            item => item.Id == messageId);
 
         Assert.Equal(expected, message.IsAvailableAt(LocalTime(localHour)));
     }

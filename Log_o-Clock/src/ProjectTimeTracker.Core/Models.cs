@@ -448,6 +448,17 @@ public sealed record TimerStartResult(
     TimeEntry Entry,
     bool ResumedPreviousEntry);
 
+public sealed record TimerStartRequest(
+    Guid ProjectId,
+    Guid? TaskId,
+    string? Description,
+    TrackingSource Source,
+    DateTimeOffset StartUtc);
+
+public sealed record TimerTransitionResult(
+    TimeEntry? StoppedEntry,
+    TimeEntry? RunningEntry);
+
 public sealed record TimeExclusion(
     Guid Id,
     Guid TimeEntryId,
@@ -700,6 +711,31 @@ public static class RecentEntryResumeSettings
             : DefaultMaximumGapMinutes;
 
     public static bool IsValidMaximumGapMinutes(int minutes) =>
+        minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
+}
+
+public static class AutomaticRecognitionSettings
+{
+    public const string EnabledKey = "recognition.automatic.enabled";
+    public const string GraceMinutesKey = "recognition.automatic.grace-minutes";
+    public const int DefaultGraceMinutes = 10;
+    public const int MinimumAllowedMinutes = 1;
+    public const int MaximumAllowedMinutes = 1_440;
+
+    public static bool ParseEnabled(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+    public static int ParseGraceMinutes(string? value) =>
+        int.TryParse(
+            value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var minutes) &&
+        IsValidGraceMinutes(minutes)
+            ? minutes
+            : DefaultGraceMinutes;
+
+    public static bool IsValidGraceMinutes(int minutes) =>
         minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
 }
 

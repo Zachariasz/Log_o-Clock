@@ -18,7 +18,7 @@ This map points a new context to the smallest relevant code surface. The root RE
 | Tags and rich descriptions | `TagDescriptionEditor`, `TagDescriptionDisplay`, `TagVisuals` | `TagParser`, `TagSettingsWindow`, tag store methods/tests | Managed tags hide `#` visually; tag rename is global; editing a description affects only that entry; tags can be project-scoped or global. |
 | Software association | `MainWindow` Software handlers, `SoftwareSettingsWindow` | `AppController` software observation, project/software tables | Software is manual only; process key is immutable; label is global; exclusion and correlated tags are project-scoped or global. |
 | Window rules | `MainWindow` Rules handlers, `RuleDialog` | `ForegroundActivityMonitor`, `RecognitionEngine` | Group/filter by project; double-click/RMB edit; delayed process/title capture. |
-| Recognition reminders | `AppController` recognition methods | `NotificationService`, `ReminderWindow`, `ProjectChooserWindow`, `EntryDetailsWindow`, `TaskTitleMatcher`, recognition tests | 500 ms stability, longest rule, ambiguity chooser, matched-monitor placement, saved-task match then spaced filename fallback, five-minute snooze; accepted fallback names are notification-originated and unused ones are pruned. |
+| Recognition reminders and full automatic mode | `AppController` recognition methods | `AutomaticRecognitionPolicy`, `NotificationService`, reminder/chooser windows, `TaskTitleMatcher`, recognition and store tests | Reminder mode retains 500 ms stability, ambiguity chooser, matched-monitor placement, filename fallback, and snooze. The title-bar automatic toggle silently starts unique matches, keeps per-boundary reversible grace state, safely ignores unresolved ambiguity, and atomically commits remembered UTC stop/switch times. |
 | Idle detection | `UserIdleMonitor`, idle handlers in `AppController` | `ShortIdleReviewPolicy`, accumulated-away tests | Observation begins at 30 s; under-five-minute intervals can accumulate over rolling four hours; dialogs serialize. |
 | Excluded-software time | `AppController` excluded-software visit/review methods | `ProjectSoftwareDefinition`, setting tests | Per process and running entry; configurable threshold; intervals remain separate so intervening work stays counted. |
 | Call/video idle protection | `IdleProtectionMonitor` | `ForegroundAudioQualificationPolicy`, settings/tests | Output render only; communication, sustained foreground audio, and video reasons; no microphone access or metadata persistence. |
@@ -68,7 +68,7 @@ This map points a new context to the smallest relevant code surface. The root RE
 ### Settings
 
 - The page is divided into independently scrollable `Tracking`, `Idle & sessions`, `Targets`, `Integrations`, and `Application` subtabs while preserving the shared Codex-dark segmented navigation and existing control contracts.
-- Recognition, recent-entry continuation, and break reminders (net active-time interval, bottom-right/centre placement, and per-message enablement).
+- Recognition, the automatic-mode stop/switch grace period, recent-entry continuation, and break reminders (net active-time interval, bottom-right/centre placement, and per-message enablement). The automatic-mode enable switch itself remains beside the title-bar profile selector.
 - Windows session behaviour, call/video idle protection and live state.
 - Excluded-software, accumulated short-idle, recent-entry resume, and short-idle reporting thresholds.
 - Scheduled target review and launch at sign-in.

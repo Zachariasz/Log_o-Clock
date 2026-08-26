@@ -17,7 +17,7 @@ Log O'clock is a local-first time tracker organized as:
 
 `Client → Project → Saved task → Time entry`
 
-It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional two-way whole-profile Google Sheets synchronization.
+It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, an opt-in full automatic mode with reversible stop/switch grace boundaries, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional two-way whole-profile Google Sheets synchronization.
 
 The detailed behaviour list is in the root [README.md](../README.md). Do not reconstruct requirements from old conversation history when the current source, tests, and README already answer the question.
 

@@ -460,6 +460,133 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task AutomaticTransitionStopsAndStartsAtomicallyAtTheRememberedBoundary()
+    {
+        var (firstProject, secondProject) = await CreateTwoProjectsAsync();
+        var secondTask = await _store.AddTaskAsync(secondProject.Id, "Recognized task");
+        var start = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        var boundary = start.AddMinutes(20);
+        var initial = await _store.StartTimerAsync(firstProject.Id, TrackingSource.Manual, start);
+        var first = await _store.SplitRunningTimerAsync(
+            initial.Id,
+            taskId: null,
+            description: null,
+            nowUtc: start.AddMinutes(1),
+            isCall: true);
+
+        var result = await _store.TransitionRunningTimerAsync(
+            first.Id,
+            boundary,
+            new TimerStartRequest(
+                secondProject.Id,
+                secondTask.Id,
+                Description: null,
+                Source: TrackingSource.WindowReminder,
+                StartUtc: boundary));
+
+        Assert.Equal(boundary, result.StoppedEntry?.EndUtc);
+        Assert.Equal(boundary, result.RunningEntry?.StartUtc);
+        Assert.Equal(secondProject.Id, result.RunningEntry?.ProjectId);
+        Assert.Equal(secondTask.Id, result.RunningEntry?.TaskId);
+        Assert.Equal(TrackingSource.WindowReminder, result.RunningEntry?.Source);
+        Assert.True(result.RunningEntry?.IsCall);
+        Assert.False(result.RunningEntry?.DetailsPending);
+        Assert.Equal(result.RunningEntry?.Id, (await _store.GetRunningEntryAsync())?.Id);
+        Assert.Single(
+            await _store.GetEntriesAsync(start.AddMinutes(-1), boundary.AddMinutes(1)),
+            entry => entry.EndUtc is null);
+    }
+
+    [Fact]
+    public async Task AutomaticTransitionCanPreserveAnUntrackedGap()
+    {
+        var (firstProject, secondProject) = await CreateTwoProjectsAsync();
+        var start = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        var stoppedAt = start.AddMinutes(20);
+        var startedAt = stoppedAt.AddMinutes(3);
+        var first = await _store.StartTimerAsync(firstProject.Id, TrackingSource.Manual, start);
+
+        var result = await _store.TransitionRunningTimerAsync(
+            first.Id,
+            stoppedAt,
+            new TimerStartRequest(
+                secondProject.Id,
+                TaskId: null,
+                Description: null,
+                Source: TrackingSource.WindowReminder,
+                StartUtc: startedAt));
+
+        Assert.Equal(stoppedAt, result.StoppedEntry?.EndUtc);
+        Assert.Equal(startedAt, result.RunningEntry?.StartUtc);
+        Assert.True(result.RunningEntry?.DetailsPending);
+    }
+
+    [Fact]
+    public async Task AutomaticStopOnlyCompletesTheEntryAndRefreshesTheMonthlyLog()
+    {
+        var (project, _) = await CreateTwoProjectsAsync();
+        var start = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        var running = await _store.StartTimerAsync(project.Id, TrackingSource.Manual, start);
+        var stoppedAt = start.AddMinutes(20);
+
+        var result = await _store.TransitionRunningTimerAsync(
+            running.Id,
+            stoppedAt,
+            nextStart: null);
+
+        Assert.Equal(running.Id, result.StoppedEntry?.Id);
+        Assert.Equal(stoppedAt, result.StoppedEntry?.EndUtc);
+        Assert.Null(result.RunningEntry);
+        Assert.Null(await _store.GetRunningEntryAsync());
+        var monthlyPath = Path.Combine(
+            _store.MonthlyLogDirectory,
+            "TimeTracker-Logs-2026-07.csv");
+        Assert.True(File.Exists(monthlyPath));
+        Assert.Contains(project.Name, await File.ReadAllTextAsync(monthlyPath));
+    }
+
+    [Fact]
+    public async Task AutomaticStopAppliesMinimumDurationAndStaleEntryRollback()
+    {
+        var (firstProject, secondProject) = await CreateTwoProjectsAsync();
+        var start = new DateTimeOffset(2026, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        var fallbackTask = await _store.GetOrAddTaskAsync(
+            firstProject.Id,
+            "Automatic filename fallback",
+            SavedTaskOrigin.Notification);
+        var first = (await _store.StartOrResumeTimerAsync(
+            firstProject.Id,
+            fallbackTask.Id,
+            description: null,
+            source: TrackingSource.WindowReminder,
+            nowUtc: start,
+            maximumGap: TimeSpan.Zero)).Entry;
+
+        var stopped = await _store.TransitionRunningTimerAsync(
+            first.Id,
+            start.AddSeconds(59),
+            nextStart: null);
+
+        Assert.Null(stopped.StoppedEntry);
+        Assert.Null(stopped.RunningEntry);
+        Assert.Null(await _store.GetRunningEntryAsync());
+        Assert.DoesNotContain(
+            await _store.GetTasksAsync(firstProject.Id),
+            task => task.Id == fallbackTask.Id);
+
+        var current = await _store.StartTimerAsync(
+            secondProject.Id,
+            TrackingSource.Manual,
+            start.AddMinutes(2));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _store.TransitionRunningTimerAsync(
+                Guid.NewGuid(),
+                start.AddMinutes(3),
+                nextStart: null));
+        Assert.Equal(current.Id, (await _store.GetRunningEntryAsync())?.Id);
+    }
+
+    [Fact]
     public async Task MatchingRecentEntryIsReopenedAndKeepsItsExistingData()
     {
         var (project, _) = await CreateTwoProjectsAsync();
@@ -3308,6 +3435,8 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await source.SaveTrelloConnectionAsync(new TrelloConnection("member", "person", "Person"));
         await source.SetSettingAsync("history.view.columns.v1", "shared-layout");
         await source.SetSettingAsync("recognition.enabled", "false");
+        await source.SetSettingAsync(AutomaticRecognitionSettings.EnabledKey, "true");
+        await source.SetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, "12");
         await source.SetSettingAsync(GoogleSheetsSettings.ConnectionKey, "must-not-sync");
         await source.SetSettingAsync(SessionTrackingSettings.ResumeMarkerKey, "must-not-sync");
         await source.SetSettingAsync(SessionTrackingSettings.ReviewEntryKey, Guid.NewGuid().ToString("D"));
@@ -3343,6 +3472,8 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.True(targetEntry.IsCall);
         Assert.Equal("shared-layout", await target.GetSettingAsync("history.view.columns.v1"));
         Assert.Equal("false", await target.GetSettingAsync("recognition.enabled"));
+        Assert.Equal("true", await target.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey));
+        Assert.Equal("12", await target.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey));
         Assert.Null(await target.GetSettingAsync(GoogleSheetsSettings.ConnectionKey));
         Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ResumeMarkerKey));
         Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ReviewEntryKey));

@@ -3411,6 +3411,149 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             IsCall: running.IsCall);
     }
 
+    public async Task<TimerTransitionResult> TransitionRunningTimerAsync(
+        Guid entryId,
+        DateTimeOffset endUtc,
+        TimerStartRequest? nextStart,
+        CancellationToken cancellationToken = default)
+    {
+        endUtc = endUtc.ToUniversalTime();
+        var normalizedNextStart = nextStart is null
+            ? null
+            : nextStart with
+            {
+                Description = string.IsNullOrWhiteSpace(nextStart.Description)
+                    ? null
+                    : nextStart.Description.Trim(),
+                StartUtc = nextStart.StartUtc.ToUniversalTime(),
+            };
+
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        TimeEntry? running = null;
+        await using (var command = connection.CreateCommand())
+        {
+            command.Transaction = transaction;
+            command.CommandText =
+                """
+                SELECT Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc,
+                       DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall
+                FROM TimeEntries
+                WHERE Id = $id AND EndUtc IS NULL
+                LIMIT 1;
+                """;
+            command.Parameters.AddWithValue("$id", entryId.ToString("D"));
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                running = MapTimeEntry(reader);
+            }
+        }
+
+        if (running is null)
+        {
+            throw new InvalidOperationException("The selected entry is no longer the running timer.");
+        }
+
+        if (endUtc < running.StartUtc)
+        {
+            endUtc = running.StartUtc;
+        }
+
+        if (normalizedNextStart is not null && normalizedNextStart.StartUtc < endUtc)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(nextStart),
+                "The next timer cannot start before the running timer ends.");
+        }
+
+        var stoppedPending =
+            running.ProjectId == SystemEntityIds.UnassignedProjectId ||
+            running.TaskId is null && string.IsNullOrWhiteSpace(running.Description);
+        await ExecuteInTransactionAsync(
+            connection,
+            transaction,
+            """
+            UPDATE TimeEntries
+            SET EndUtc = $end,
+                LastCheckpointUtc = $end,
+                DetailsPending = $pending,
+                ModifiedUtc = $end
+            WHERE Id = $id AND EndUtc IS NULL;
+            """,
+            cancellationToken,
+            ("$end", Format(endUtc)),
+            ("$pending", stoppedPending ? 1 : 0),
+            ("$id", running.Id.ToString("D")));
+        var deleted = await DeleteSubMinuteCompletedEntriesAsync(
+            connection,
+            transaction,
+            running.Id,
+            cancellationToken);
+
+        TimeEntry? nextEntry = null;
+        if (normalizedNextStart is not null)
+        {
+            var nextEntryId = Guid.NewGuid();
+            var nextPending =
+                normalizedNextStart.ProjectId == SystemEntityIds.UnassignedProjectId ||
+                normalizedNextStart.TaskId is null && normalizedNextStart.Description is null;
+            await EnsureTagsForDescriptionAsync(
+                connection,
+                transaction,
+                normalizedNextStart.Description,
+                normalizedNextStart.ProjectId,
+                cancellationToken);
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                """
+                INSERT INTO TimeEntries
+                    (Id, ProjectId, TaskId, Description, StartUtc, EndUtc, LastCheckpointUtc, DetailsPending, Source, CreatedUtc, ModifiedUtc, IsPaid, IsCall)
+                VALUES
+                    ($id, $project, $task, $description, $start, NULL, $start, $pending, $source, $start, $start, 0, $call);
+                """,
+                cancellationToken,
+                ("$id", nextEntryId.ToString("D")),
+                ("$project", normalizedNextStart.ProjectId.ToString("D")),
+                ("$task", normalizedNextStart.TaskId?.ToString("D")),
+                ("$description", normalizedNextStart.Description),
+                ("$start", Format(normalizedNextStart.StartUtc)),
+                ("$pending", nextPending ? 1 : 0),
+                ("$source", (int)normalizedNextStart.Source),
+                ("$call", running.IsCall ? 1 : 0));
+            nextEntry = new TimeEntry(
+                nextEntryId,
+                normalizedNextStart.ProjectId,
+                normalizedNextStart.TaskId,
+                normalizedNextStart.Description,
+                normalizedNextStart.StartUtc,
+                null,
+                normalizedNextStart.StartUtc,
+                nextPending,
+                normalizedNextStart.Source,
+                normalizedNextStart.StartUtc,
+                normalizedNextStart.StartUtc,
+                IsCall: running.IsCall);
+        }
+
+        await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
+        transaction.Commit();
+        await connection.CloseAsync();
+        await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+
+        var stoppedEntry = deleted > 0
+            ? null
+            : running with
+            {
+                EndUtc = endUtc,
+                LastCheckpointUtc = endUtc,
+                DetailsPending = stoppedPending,
+                ModifiedUtc = endUtc,
+            };
+        return new TimerTransitionResult(stoppedEntry, nextEntry);
+    }
+
     public async Task<TimeEntry?> StopRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default)
     {
         var running = await GetRunningEntryAsync(cancellationToken);

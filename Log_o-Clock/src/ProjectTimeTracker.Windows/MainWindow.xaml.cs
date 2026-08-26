@@ -87,6 +87,7 @@ public partial class MainWindow : Window
     private bool _updatingSoftwareFilter;
     private bool _updatingTaskFilter;
     private bool _updatingTargetFilter;
+    private bool _updatingAutomaticRecognitionControls;
     private TextBox? _timerTaskEditor;
     private ListCollectionView? _timerTaskSearchView;
     private string _timerTaskSearchText = string.Empty;
@@ -245,6 +246,7 @@ public partial class MainWindow : Window
         _controller.RunningEntryChanged += Controller_RunningEntryChanged;
         _controller.DataChanged += Controller_DataChanged;
         _controller.IdleProtectionChanged += Controller_IdleProtectionChanged;
+        _controller.AutomaticRecognitionSettingsChanged += Controller_AutomaticRecognitionSettingsChanged;
         _trelloSync.SyncCompleted += TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted += GoogleSheetsSync_SyncCompleted;
         _updateCheck.StateChanged += UpdateCheck_StateChanged;
@@ -278,6 +280,7 @@ public partial class MainWindow : Window
         _windowSource?.RemoveHook(WindowMessageHook);
         _windowSource = null;
         _controller.IdleProtectionChanged -= Controller_IdleProtectionChanged;
+        _controller.AutomaticRecognitionSettingsChanged -= Controller_AutomaticRecognitionSettingsChanged;
         _trelloSync.SyncCompleted -= TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted -= GoogleSheetsSync_SyncCompleted;
         _updateCheck.StateChanged -= UpdateCheck_StateChanged;
@@ -808,6 +811,70 @@ public partial class MainWindow : Window
         }
     }
 
+    internal async Task VerifyAutomaticRecognitionControlsForPreviewAsync()
+    {
+        if (AutomaticRecognitionToggle.Parent is not StackPanel titleIdentity ||
+            titleIdentity.Children.IndexOf(AutomaticRecognitionToggle) !=
+            titleIdentity.Children.IndexOf(ProfileButton) + 1 ||
+            AutomaticRecognitionToggle.Content is not null ||
+            AutomaticRecognitionToggle.Width != 44 ||
+            AutomaticRecognitionToggle.Height != 32 ||
+            !string.Equals(
+                AutomationProperties.GetName(AutomaticRecognitionToggle),
+                "Full automatic project tracking",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The full automatic toggle is not the unlabeled title-bar control beside the profile selector.");
+        }
+
+        AutomaticRecognitionToggle.ApplyTemplate();
+        var track = AutomaticRecognitionToggle.Template.FindName(
+            "Track",
+            AutomaticRecognitionToggle) as Border
+            ?? throw new InvalidOperationException("The automatic-mode title-bar toggle has no track.");
+
+        try
+        {
+            await _controller.SetAutomaticRecognitionGraceMinutesAsync(3);
+            await _controller.SetAutomaticRecognitionEnabledAsync(true);
+            UpdateLayout();
+            if (AutomaticRecognitionToggle.IsChecked != true ||
+                !ReferenceEquals(track.Background, FindResource("SuccessBrush")) ||
+                await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey) != "true" ||
+                await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey) != "3" ||
+                AutomaticRecognitionToggle.ToolTip is not string tooltip ||
+                !tooltip.Contains("3 minutes", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "The title-bar automatic-mode toggle did not apply its green state, tooltip, or persisted settings.");
+            }
+
+            AutomaticRecognitionGraceMinutesText.Text = "4";
+            await ApplyAutomaticRecognitionGraceMinutesAsync();
+            if (_controller.AutomaticRecognitionGraceMinutes != 4 ||
+                AutomaticRecognitionGraceValidationText.Visibility != Visibility.Collapsed)
+            {
+                throw new InvalidOperationException(
+                    "The automatic recognition grace-period field did not apply a valid value.");
+            }
+        }
+        finally
+        {
+            await _controller.SetAutomaticRecognitionEnabledAsync(false);
+            await _controller.SetAutomaticRecognitionGraceMinutesAsync(
+                AutomaticRecognitionSettings.DefaultGraceMinutes);
+            UpdateLayout();
+        }
+
+        if (AutomaticRecognitionToggle.IsChecked != false ||
+            !ReferenceEquals(track.Background, FindResource("StatePressedBrush")))
+        {
+            throw new InvalidOperationException(
+                "The automatic-mode title-bar toggle did not restore its standard gray disabled state.");
+        }
+    }
+
     internal void VerifyHistoryDefaultMonthForPreview(int year, int month)
     {
         var expectedStart = new DateTime(year, month, 1);
@@ -889,7 +956,9 @@ public partial class MainWindow : Window
             ReportInclusiveLegendItems, ReportGrid, ReportTargetsList,
             ReportSaveViewButton, ReportColumnsButton,
             SidebarTargetsPanel, SidebarTargetsResizeThumb, TargetsGrid, FloatingTargetsGrid,
-            SettingsCategoryTabs, RecognitionCheck, SessionBehaviorCombo, SessionBehaviorDescriptionText,
+            SettingsCategoryTabs, RecognitionCheck, AutomaticRecognitionToggle,
+            AutomaticRecognitionGraceMinutesText, AutomaticRecognitionGraceValidationText,
+            SessionBehaviorCombo, SessionBehaviorDescriptionText,
             RecentEntryResumeMinutesText, RecentEntryResumeValidationText,
             BreakReminderMinutesText, BreakReminderValidationText,
             BreakReminderBottomRight, BreakReminderScreenCenter, BreakReminderMessagesPanel,
@@ -2715,6 +2784,7 @@ public partial class MainWindow : Window
         var sidebarWidth = width >= 1180 ? 275d : width >= 1040 ? 240d : 0d;
         TitleSidebarColumn.Width = new GridLength(sidebarWidth);
         TimerSidebarColumn.Width = new GridLength(sidebarWidth);
+        ProfileNameText.MaxWidth = sidebarWidth >= 275d ? 52d : 18d;
         SidebarTargetsPanel.Width = sidebarWidth;
         SidebarTargetsPanel.Visibility = sidebarWidth == 0 ? Visibility.Collapsed : Visibility.Visible;
         ApplySidebarTargetsPanelHeight();
@@ -3051,6 +3121,7 @@ public partial class MainWindow : Window
         await SetDefaultHistoryRangeAsync(today);
         ReportRangePicker.SetRange(new DateTime(today.Year, today.Month, 1), today, notify: false);
         RecognitionCheck.IsChecked = _controller.RecognitionEnabled;
+        UpdateAutomaticRecognitionControls();
         SessionBehaviorCombo.SelectedIndex =
             _controller.SessionTrackingBehavior == SessionTrackingBehavior.StopTimer ? 0 : 1;
         UpdateSessionBehaviorDescription();
@@ -8558,16 +8629,131 @@ public partial class MainWindow : Window
         }
     }
 
+    private void Controller_AutomaticRecognitionSettingsChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(UpdateAutomaticRecognitionControls);
+            return;
+        }
+
+        UpdateAutomaticRecognitionControls();
+    }
+
+    private void UpdateAutomaticRecognitionControls()
+    {
+        _updatingAutomaticRecognitionControls = true;
+        try
+        {
+            AutomaticRecognitionToggle.IsChecked = _controller.AutomaticRecognitionEnabled;
+            AutomaticRecognitionToggle.ToolTip =
+                "Full automatic mode\n" +
+                "Starts recognized projects silently. Stops and project switches become final after " +
+                $"{_controller.AutomaticRecognitionGraceMinutes} minutes, using the original foreground-change time.";
+            AutomaticRecognitionGraceMinutesText.Text =
+                _controller.AutomaticRecognitionGraceMinutes.ToString(CultureInfo.CurrentCulture);
+            AutomaticRecognitionGraceValidationText.Visibility = Visibility.Collapsed;
+            RecognitionCheck.IsChecked = _controller.RecognitionEnabled;
+        }
+        finally
+        {
+            _updatingAutomaticRecognitionControls = false;
+        }
+    }
+
+    private async void AutomaticRecognitionToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingAutomaticRecognitionControls)
+        {
+            return;
+        }
+
+        try
+        {
+            await _controller.SetAutomaticRecognitionEnabledAsync(
+                AutomaticRecognitionToggle.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            UpdateAutomaticRecognitionControls();
+            ShowError("Could not update full automatic mode", exception);
+        }
+    }
+
     private async void RecognitionCheck_Changed(object sender, RoutedEventArgs e)
     {
         _ = sender;
         _ = e;
-        if (!_loaded || _loading)
+        if (!_loaded || _loading || _updatingAutomaticRecognitionControls)
         {
             return;
         }
 
         await _controller.SetRecognitionEnabledAsync(RecognitionCheck.IsChecked == true);
+    }
+
+    private async void AutomaticRecognitionGraceMinutesText_LostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await ApplyAutomaticRecognitionGraceMinutesAsync();
+    }
+
+    private async void AutomaticRecognitionGraceMinutesText_PreviewKeyDown(
+        object sender,
+        KeyEventArgs e)
+    {
+        _ = sender;
+        if (e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await ApplyAutomaticRecognitionGraceMinutesAsync();
+    }
+
+    private async Task ApplyAutomaticRecognitionGraceMinutesAsync()
+    {
+        if (!_loaded || _loading || _updatingAutomaticRecognitionControls)
+        {
+            return;
+        }
+
+        var value = AutomaticRecognitionGraceMinutesText.Text.Trim();
+        if (!int.TryParse(
+                value,
+                NumberStyles.None,
+                CultureInfo.CurrentCulture,
+                out var minutes) ||
+            !AutomaticRecognitionSettings.IsValidGraceMinutes(minutes))
+        {
+            AutomaticRecognitionGraceValidationText.Text =
+                $"Enter a whole number from {AutomaticRecognitionSettings.MinimumAllowedMinutes} to {AutomaticRecognitionSettings.MaximumAllowedMinutes} minutes.";
+            AutomaticRecognitionGraceValidationText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        try
+        {
+            if (minutes != _controller.AutomaticRecognitionGraceMinutes)
+            {
+                await _controller.SetAutomaticRecognitionGraceMinutesAsync(minutes);
+            }
+
+            UpdateAutomaticRecognitionControls();
+        }
+        catch (Exception exception)
+        {
+            UpdateAutomaticRecognitionControls();
+            ShowError("Could not update automatic recognition grace period", exception);
+        }
     }
 
     private async void SessionBehaviorCombo_SelectionChanged(

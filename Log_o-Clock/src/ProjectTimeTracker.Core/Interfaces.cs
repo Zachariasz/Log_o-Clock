@@ -310,6 +310,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
         CancellationToken cancellationToken = default);
     Task<TimeEntry> SplitRunningTimerAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default, bool? isCall = null);
     Task<TimeEntry> SwitchRunningTimerAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, TrackingSource source, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
+    Task<TimerTransitionResult> TransitionRunningTimerAsync(Guid entryId, DateTimeOffset endUtc, TimerStartRequest? nextStart, CancellationToken cancellationToken = default);
     Task<TimeEntry?> StopRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<bool> CancelRunningTimerAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task CheckpointRunningTimerAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken = default);

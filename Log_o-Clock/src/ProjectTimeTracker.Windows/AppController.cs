@@ -29,6 +29,8 @@ public sealed class AppController : IAsyncDisposable
     private readonly RecognitionEngine _recognitionEngine = new();
     private readonly TaskTitleMatcher _taskTitleMatcher = new();
     private readonly RecognitionPromptPolicy _promptPolicy = new(TimeSpan.Zero);
+    private readonly AutomaticRecognitionPolicy _automaticRecognitionPolicy = new(
+        TimeSpan.FromMinutes(AutomaticRecognitionSettings.DefaultGraceMinutes));
     private readonly DispatcherTimer _secondTimer;
     private readonly DispatcherTimer _checkpointTimer;
     private readonly DispatcherTimer _targetReviewTimer;
@@ -37,6 +39,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly SemaphoreSlim _idleReviewGate = new(1, 1);
     private readonly SemaphoreSlim _targetReviewGate = new(1, 1);
     private readonly SemaphoreSlim _breakReminderGate = new(1, 1);
+    private readonly SemaphoreSlim _automaticRecognitionGate = new(1, 1);
     private IReadOnlyList<RecognitionCandidate> _recognitionCandidates = [];
     private IReadOnlyDictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition> _projectSoftware =
         new Dictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition>();
@@ -45,6 +48,8 @@ public sealed class AppController : IAsyncDisposable
     private WindowActivity? _lastActivity;
     private WindowActivity? _lastExternalActivity;
     private WindowActivity? _lastTrackableActivity;
+    private AutomaticForegroundKey? _lastAutomaticForegroundKey;
+    private bool _automaticForegroundSnapshotInitialized;
     private IdleCandidate? _idleCandidate;
     private readonly Dictionary<string, ExcludedSoftwareReview> _excludedSoftwareReviews =
         new(StringComparer.OrdinalIgnoreCase);
@@ -110,10 +115,14 @@ public sealed class AppController : IAsyncDisposable
     public event EventHandler<TimeEntry?>? RunningEntryChanged;
     public event EventHandler<EntryDetailsRequest>? DetailsRequested;
     public event EventHandler<IdleProtectionState>? IdleProtectionChanged;
+    public event EventHandler? AutomaticRecognitionSettingsChanged;
 
     public TimeEntry? RunningEntry { get; private set; }
     public long RunningExcludedSeconds { get; private set; }
     public bool RecognitionEnabled { get; private set; } = true;
+    public bool AutomaticRecognitionEnabled { get; private set; }
+    public int AutomaticRecognitionGraceMinutes { get; private set; } =
+        AutomaticRecognitionSettings.DefaultGraceMinutes;
     public bool CallsIdleProtectionEnabled { get; private set; } = true;
     public bool VideoIdleProtectionEnabled { get; private set; } = true;
     public IdleProtectionState IdleProtectionState => _idleProtectionState;
@@ -159,6 +168,12 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync("recognition.enabled", cancellationToken),
             "false",
             StringComparison.OrdinalIgnoreCase);
+        AutomaticRecognitionEnabled = RecognitionEnabled && AutomaticRecognitionSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
+        AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
+            await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
+        _automaticRecognitionPolicy.SetGracePeriod(
+            TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
             await _store.GetSettingAsync(
                 IdleProtectionSettings.CallsEnabledKey,
@@ -259,6 +274,11 @@ public sealed class AppController : IAsyncDisposable
         _idleProtectionMonitor.Start();
         _idleMonitor.Start();
         _sessionMonitor.Start();
+        ResetAutomaticRecognitionPolicy();
+        if (AutomaticRecognitionEnabled)
+        {
+            PollAutomaticForeground(force: true);
+        }
         _secondTimer.Start();
         _checkpointTimer.Start();
         _targetReviewTimer.Start();
@@ -269,7 +289,12 @@ public sealed class AppController : IAsyncDisposable
     {
         await ReloadSoftwareSettingsCoreAsync(cancellationToken);
         DataChanged?.Invoke(this, EventArgs.Empty);
-        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        if (AutomaticRecognitionEnabled)
+        {
+            ResetAutomaticRecognitionPolicy();
+            PollAutomaticForeground(force: true);
+        }
+        else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
         }
@@ -284,6 +309,12 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync("recognition.enabled", cancellationToken),
             "false",
             StringComparison.OrdinalIgnoreCase);
+        AutomaticRecognitionEnabled = RecognitionEnabled && AutomaticRecognitionSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
+        AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
+            await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
+        _automaticRecognitionPolicy.SetGracePeriod(
+            TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
             await _store.GetSettingAsync(IdleProtectionSettings.CallsEnabledKey, cancellationToken));
         VideoIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
@@ -318,8 +349,14 @@ public sealed class AppController : IAsyncDisposable
             CallsIdleProtectionEnabled,
             VideoIdleProtectionEnabled);
         ResetBreakReminderStreak();
+        ResetAutomaticRecognitionPolicy();
+        AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
         DataChanged?.Invoke(this, EventArgs.Empty);
-        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        if (AutomaticRecognitionEnabled)
+        {
+            PollAutomaticForeground(force: true);
+        }
+        else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
         }
@@ -331,12 +368,78 @@ public sealed class AppController : IAsyncDisposable
         await _store.SetSettingAsync("recognition.enabled", enabled ? "true" : "false", cancellationToken);
         if (!enabled)
         {
+            AutomaticRecognitionEnabled = false;
+            await _store.SetSettingAsync(
+                AutomaticRecognitionSettings.EnabledKey,
+                "false",
+                cancellationToken);
             _notificationService.DismissActive();
             _recognitionDebounce?.Cancel();
+            ResetAutomaticRecognitionPolicy();
+        }
+        else if (AutomaticRecognitionEnabled)
+        {
+            PollAutomaticForeground(force: true);
         }
         else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
+        }
+
+        AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task SetAutomaticRecognitionEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        if (enabled && !RecognitionEnabled)
+        {
+            RecognitionEnabled = true;
+            await _store.SetSettingAsync("recognition.enabled", "true", cancellationToken);
+        }
+
+        AutomaticRecognitionEnabled = enabled;
+        await _store.SetSettingAsync(
+            AutomaticRecognitionSettings.EnabledKey,
+            enabled ? "true" : "false",
+            cancellationToken);
+        _notificationService.DismissActive();
+        _recognitionDebounce?.Cancel();
+        ResetAutomaticRecognitionPolicy();
+        if (enabled)
+        {
+            PollAutomaticForeground(force: true);
+        }
+        else if (RecognitionEnabled && _foregroundMonitor.GetCurrentActivity() is { } activity)
+        {
+            QueueActivity(activity);
+        }
+
+        AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task SetAutomaticRecognitionGraceMinutesAsync(
+        int minutes,
+        CancellationToken cancellationToken = default)
+    {
+        if (!AutomaticRecognitionSettings.IsValidGraceMinutes(minutes))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(minutes),
+                $"Automatic recognition grace must be between {AutomaticRecognitionSettings.MinimumAllowedMinutes} and {AutomaticRecognitionSettings.MaximumAllowedMinutes} minutes.");
+        }
+
+        AutomaticRecognitionGraceMinutes = minutes;
+        _automaticRecognitionPolicy.SetGracePeriod(TimeSpan.FromMinutes(minutes));
+        await _store.SetSettingAsync(
+            AutomaticRecognitionSettings.GraceMinutesKey,
+            minutes.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            cancellationToken);
+        AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
+        if (AutomaticRecognitionEnabled)
+        {
+            _ = ProcessAutomaticRecognitionActionsAsync();
         }
     }
 
@@ -558,7 +661,12 @@ public sealed class AppController : IAsyncDisposable
         }
 
         DataChanged?.Invoke(this, EventArgs.Empty);
-        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        if (AutomaticRecognitionEnabled)
+        {
+            ResetAutomaticRecognitionPolicy();
+            PollAutomaticForeground(force: true);
+        }
+        else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
         }
@@ -607,6 +715,7 @@ public sealed class AppController : IAsyncDisposable
 
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         if (showDetails)
         {
             await RequestDetailsAsync(RunningEntry, cancellationToken);
@@ -661,6 +770,7 @@ public sealed class AppController : IAsyncDisposable
             cancellationToken);
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         return RunningEntry;
     }
 
@@ -719,6 +829,7 @@ public sealed class AppController : IAsyncDisposable
             cancellationToken);
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         return RunningEntry;
     }
 
@@ -743,6 +854,7 @@ public sealed class AppController : IAsyncDisposable
             cancellationToken);
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         return RunningEntry;
     }
 
@@ -800,6 +912,7 @@ public sealed class AppController : IAsyncDisposable
             return;
         }
 
+        var previousProjectId = RunningEntry.ProjectId;
         await _store.UpdateEntryAssignmentAsync(
             RunningEntry.Id,
             projectId,
@@ -819,6 +932,10 @@ public sealed class AppController : IAsyncDisposable
             ModifiedUtc = _clock.UtcNow,
         };
         DataChanged?.Invoke(this, EventArgs.Empty);
+        if (projectId != previousProjectId)
+        {
+            ReconcileAutomaticRecognitionAfterTimerMutation();
+        }
     }
 
     public Task ShowRunningEntryDetailsAsync(CancellationToken cancellationToken = default)
@@ -863,6 +980,7 @@ public sealed class AppController : IAsyncDisposable
         await RecordInitialSoftwareAsync(RunningEntry.Id, TrackingSource.Manual, cancellationToken);
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         return RunningEntry;
     }
 
@@ -877,13 +995,14 @@ public sealed class AppController : IAsyncDisposable
         RunningExcludedSeconds = 0;
         RunningEntryChanged?.Invoke(this, null);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
 
         if (stopped is not null)
         {
             await RequestDetailsAsync(stopped, cancellationToken);
         }
 
-        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        if (!AutomaticRecognitionEnabled && _foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
         }
@@ -917,6 +1036,7 @@ public sealed class AppController : IAsyncDisposable
         ResetBreakReminderStreak();
         RunningEntryChanged?.Invoke(this, null);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ReconcileAutomaticRecognitionAfterTimerMutation();
         return true;
     }
 
@@ -955,6 +1075,9 @@ public sealed class AppController : IAsyncDisposable
         Guid? taskId,
         string? description)
     {
+        var previousProjectId = RunningEntry?.Id == entryId
+            ? RunningEntry.ProjectId
+            : (Guid?)null;
         description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
         if (RunningEntry?.Id == entryId)
         {
@@ -972,6 +1095,10 @@ public sealed class AppController : IAsyncDisposable
         }
 
         DataChanged?.Invoke(this, EventArgs.Empty);
+        if (previousProjectId is not null && previousProjectId != projectId)
+        {
+            ReconcileAutomaticRecognitionAfterTimerMutation();
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -1003,6 +1130,7 @@ public sealed class AppController : IAsyncDisposable
         _accumulatedAwayReviewGate.Dispose();
         _idleReviewGate.Dispose();
         _targetReviewGate.Dispose();
+        _automaticRecognitionGate.Dispose();
         await _store.DisposeAsync();
     }
 
@@ -1022,12 +1150,21 @@ public sealed class AppController : IAsyncDisposable
             return;
         }
 
+        _lastActivity = activity;
+
         if (IsTrackableProcess(activity.ProcessName))
         {
             _lastExternalActivity = activity;
         }
 
-        QueueRecognition(activity);
+        if (AutomaticRecognitionEnabled)
+        {
+            QueueAutomaticRecognition(activity);
+        }
+        else
+        {
+            QueueRecognition(activity);
+        }
         if (RunningEntry is { } runningEntry &&
             TryGetExcludedSoftware(runningEntry.ProjectId, activity.ProcessName, out var excludedSoftware))
         {
@@ -1639,6 +1776,323 @@ public sealed class AppController : IAsyncDisposable
         _ = EvaluateAfterDebounceAsync(activity, _recognitionDebounce.Token);
     }
 
+    private void PollAutomaticForeground(bool force = false)
+    {
+        if (_disposed || !AutomaticRecognitionEnabled)
+        {
+            return;
+        }
+
+        var current = _foregroundMonitor.GetCurrentActivity();
+        if (current is not null)
+        {
+            var key = AutomaticForegroundKey.From(current);
+            if (!force && _automaticForegroundSnapshotInitialized &&
+                _lastAutomaticForegroundKey == key)
+            {
+                return;
+            }
+
+            QueueActivity(current);
+            return;
+        }
+
+        QueueAutomaticRecognition(activity: null, force);
+    }
+
+    private void QueueAutomaticRecognition(WindowActivity? activity, bool force = false)
+    {
+        if (_disposed || !AutomaticRecognitionEnabled)
+        {
+            return;
+        }
+
+        AutomaticForegroundKey? key = activity is null
+            ? null
+            : AutomaticForegroundKey.From(activity);
+        if (!force && _automaticForegroundSnapshotInitialized &&
+            _lastAutomaticForegroundKey == key)
+        {
+            return;
+        }
+
+        _automaticForegroundSnapshotInitialized = true;
+        _lastAutomaticForegroundKey = key;
+        var observedUtc = activity?.ObservedUtc ?? _clock.UtcNow;
+        var observedMonotonicSeconds = _clock.MonotonicSeconds;
+        _recognitionDebounce?.Cancel();
+        _recognitionDebounce?.Dispose();
+        _recognitionDebounce = new CancellationTokenSource();
+        _ = EvaluateAutomaticAfterDebounceAsync(
+            activity,
+            observedUtc,
+            observedMonotonicSeconds,
+            _recognitionDebounce.Token);
+    }
+
+    private async Task EvaluateAutomaticAfterDebounceAsync(
+        WindowActivity? activity,
+        DateTimeOffset observedUtc,
+        double observedMonotonicSeconds,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(RecognitionStabilityDelay, cancellationToken);
+            if (!AutomaticRecognitionEnabled || !_systemAvailable || _idleMonitor.IsIdle)
+            {
+                return;
+            }
+
+            AutomaticForegroundKey? currentKey = activity is null
+                ? null
+                : AutomaticForegroundKey.From(activity);
+            if (!_automaticForegroundSnapshotInitialized ||
+                _lastAutomaticForegroundKey != currentKey)
+            {
+                return;
+            }
+
+            await _automaticRecognitionGate.WaitAsync(cancellationToken);
+            try
+            {
+                await ProcessAutomaticRecognitionActionsLockedAsync(
+                    observedMonotonicSeconds,
+                    cancellationToken);
+                var match = activity is null
+                    ? new RecognitionMatch([], 0)
+                    : GetTrackableRecognitionMatch(activity);
+                var projectId = _automaticRecognitionPolicy.ResolveProjectId(match);
+                _automaticRecognitionPolicy.Observe(
+                    projectId,
+                    observedUtc,
+                    observedMonotonicSeconds,
+                    activity);
+                await ProcessAutomaticRecognitionActionsLockedAsync(
+                    _clock.MonotonicSeconds,
+                    cancellationToken);
+            }
+            finally
+            {
+                _automaticRecognitionGate.Release();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            ResetAutomaticRecognitionPolicy();
+        }
+    }
+
+    private void ResetAutomaticRecognitionPolicy()
+    {
+        _automaticRecognitionPolicy.Reset(
+            RunningEntry?.ProjectId,
+            _clock.UtcNow,
+            _clock.MonotonicSeconds);
+        _automaticForegroundSnapshotInitialized = false;
+        _lastAutomaticForegroundKey = null;
+    }
+
+    private void ReconcileAutomaticRecognitionAfterTimerMutation()
+    {
+        if (!AutomaticRecognitionEnabled || _disposed)
+        {
+            return;
+        }
+
+        _recognitionDebounce?.Cancel();
+        ResetAutomaticRecognitionPolicy();
+        PollAutomaticForeground(force: true);
+    }
+
+    private async Task ProcessAutomaticRecognitionActionsAsync()
+    {
+        if (_disposed || !AutomaticRecognitionEnabled ||
+            !await _automaticRecognitionGate.WaitAsync(0))
+        {
+            return;
+        }
+
+        try
+        {
+            await ProcessAutomaticRecognitionActionsLockedAsync(
+                _clock.MonotonicSeconds,
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            Debug.WriteLine(exception);
+            ResetAutomaticRecognitionPolicy();
+        }
+        finally
+        {
+            _automaticRecognitionGate.Release();
+        }
+    }
+
+    private async Task ProcessAutomaticRecognitionActionsLockedAsync(
+        double monotonicSeconds,
+        CancellationToken cancellationToken)
+    {
+        while (AutomaticRecognitionEnabled &&
+               _automaticRecognitionPolicy.TakeNextAction(monotonicSeconds) is { } action)
+        {
+            await ApplyAutomaticRecognitionActionAsync(action, cancellationToken);
+        }
+    }
+
+    private async Task ApplyAutomaticRecognitionActionAsync(
+        AutomaticRecognitionAction action,
+        CancellationToken cancellationToken)
+    {
+        if (action.IsInitialStart)
+        {
+            if (RunningEntry is not null || action.StartingVisit is not { } initialVisit)
+            {
+                ResetAutomaticRecognitionPolicy();
+                return;
+            }
+
+            var taskId = await ResolveAutomaticTaskAsync(initialVisit, cancellationToken);
+            var startResult = await _store.StartOrResumeTimerAsync(
+                initialVisit.ProjectId!.Value,
+                taskId,
+                null,
+                TrackingSource.WindowReminder,
+                initialVisit.StartedUtc,
+                TimeSpan.FromMinutes(RecentEntryResumeMaximumGapMinutes),
+                cancellationToken);
+            RunningEntry = startResult.Entry;
+            ResetExcludedSoftwareTracking();
+            RunningExcludedSeconds = startResult.ResumedPreviousEntry
+                ? await _store.GetEntryExcludedSecondsAsync(RunningEntry.Id, cancellationToken)
+                : 0;
+            ResetBreakReminderStreak();
+            _breakReminderEntryBaselineSeconds = 0;
+            await RecordAutomaticInitialSoftwareAsync(
+                RunningEntry.Id,
+                initialVisit,
+                cancellationToken);
+            RunningEntryChanged?.Invoke(this, RunningEntry);
+            DataChanged?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        if (RunningEntry is not { } runningEntry ||
+            action.EndingProjectId != runningEntry.ProjectId ||
+            action.EndUtc is not { } endUtc)
+        {
+            ResetAutomaticRecognitionPolicy();
+            return;
+        }
+
+        await ReviewExcludedSoftwareVisitsAsync(endUtc);
+        await ReviewIdleCandidateAsync(endUtc);
+        var nextVisit = action.StartingVisit;
+        var taskIdForNext = nextVisit is null
+            ? null
+            : await ResolveAutomaticTaskAsync(nextVisit, cancellationToken);
+        CompleteBreakReminderEntry(endUtc);
+        var transition = await _store.TransitionRunningTimerAsync(
+            runningEntry.Id,
+            endUtc,
+            nextVisit is null
+                ? null
+                : new TimerStartRequest(
+                    nextVisit.ProjectId!.Value,
+                    taskIdForNext,
+                    Description: null,
+                    Source: TrackingSource.WindowReminder,
+                    StartUtc: nextVisit.StartedUtc),
+            cancellationToken);
+
+        ResetExcludedSoftwareTracking();
+        RunningEntry = transition.RunningEntry;
+        RunningExcludedSeconds = 0;
+        if (RunningEntry is null)
+        {
+            ResetBreakReminderStreak();
+        }
+        else if (nextVisit!.StartedUtc > endUtc)
+        {
+            ResetBreakReminderStreak();
+            _breakReminderEntryBaselineSeconds = 0;
+        }
+        else
+        {
+            BeginBreakReminderEntry();
+            _breakReminderEntryBaselineSeconds = 0;
+        }
+
+        if (RunningEntry is not null && nextVisit is not null)
+        {
+            await RecordAutomaticInitialSoftwareAsync(
+                RunningEntry.Id,
+                nextVisit,
+                cancellationToken);
+        }
+
+        RunningEntryChanged?.Invoke(this, RunningEntry);
+        DataChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private async Task<Guid?> ResolveAutomaticTaskAsync(
+        AutomaticRecognitionVisit visit,
+        CancellationToken cancellationToken)
+    {
+        var activity = visit.Activity;
+        if (visit.ProjectId is not { } projectId ||
+            activity is null ||
+            string.IsNullOrWhiteSpace(activity.Title))
+        {
+            return null;
+        }
+
+        var projectTasks = await _store.GetTasksAsync(
+            projectId,
+            cancellationToken: cancellationToken);
+        var suggestion = _taskTitleMatcher.Suggest(activity.Title, projectTasks);
+        if (suggestion.ShouldCorrectSavedTaskName &&
+            suggestion.SavedTask is { } savedTask &&
+            suggestion.FileTaskName is { } fileTaskName &&
+            !projectTasks.Any(task =>
+                task.Id != savedTask.Id &&
+                string.Equals(task.Name, fileTaskName, StringComparison.OrdinalIgnoreCase)))
+        {
+            await _store.RenameTaskAsync(savedTask.Id, fileTaskName, cancellationToken);
+            return savedTask.Id;
+        }
+
+        if (suggestion.SavedTask is { } matchedTask)
+        {
+            return matchedTask.Id;
+        }
+
+        return string.IsNullOrWhiteSpace(suggestion.TaskName)
+            ? null
+            : (await _store.GetOrAddTaskAsync(
+                projectId,
+                suggestion.TaskName,
+                SavedTaskOrigin.Notification,
+                cancellationToken)).Id;
+    }
+
+    private Task RecordAutomaticInitialSoftwareAsync(
+        Guid entryId,
+        AutomaticRecognitionVisit visit,
+        CancellationToken cancellationToken) =>
+        visit.Activity is { } activity && IsTrackableProcess(activity.ProcessName)
+            ? RecordSoftwareAsync(
+                entryId,
+                activity.ProcessName,
+                notify: false,
+                cancellationToken: cancellationToken)
+            : Task.CompletedTask;
+
     private async Task EvaluateAfterDebounceAsync(WindowActivity activity, CancellationToken cancellationToken)
     {
         try
@@ -1703,6 +2157,22 @@ public sealed class AppController : IAsyncDisposable
 
     private RecognitionMatch GetRelevantRecognitionMatch(WindowActivity activity)
     {
+        var match = GetTrackableRecognitionMatch(activity);
+        if (RunningEntry is null)
+        {
+            return match;
+        }
+
+        var switchCandidates = match.Candidates
+            .Where(candidate => candidate.Project.Id != RunningEntry.ProjectId)
+            .ToArray();
+        return switchCandidates.Length == match.Candidates.Count
+            ? match
+            : new RecognitionMatch(switchCandidates, match.Score);
+    }
+
+    private RecognitionMatch GetTrackableRecognitionMatch(WindowActivity activity)
+    {
         var match = _recognitionEngine.Match(activity, _recognitionCandidates);
         var trackableCandidates = match.Candidates
             .Where(candidate => !TryGetExcludedSoftware(
@@ -1715,17 +2185,7 @@ public sealed class AppController : IAsyncDisposable
             match = new RecognitionMatch(trackableCandidates, match.Score);
         }
 
-        if (RunningEntry is null)
-        {
-            return match;
-        }
-
-        var switchCandidates = match.Candidates
-            .Where(candidate => candidate.Project.Id != RunningEntry.ProjectId)
-            .ToArray();
-        return switchCandidates.Length == match.Candidates.Count
-            ? match
-            : new RecognitionMatch(switchCandidates, match.Score);
+        return match;
     }
 
     private async Task ShowRecognitionReminderAsync(
@@ -1953,7 +2413,12 @@ public sealed class AppController : IAsyncDisposable
         _ = sender;
         await ReviewExcludedSoftwareVisitsAsync(resumedUtc);
         await ReviewIdleCandidateAsync(resumedUtc);
-        if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+        if (AutomaticRecognitionEnabled)
+        {
+            ResetAutomaticRecognitionPolicy();
+            PollAutomaticForeground(force: true);
+        }
+        else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
         {
             QueueActivity(activity);
         }
@@ -2007,6 +2472,8 @@ public sealed class AppController : IAsyncDisposable
     {
         _systemAvailable = false;
         _notificationService.DismissActive();
+        _recognitionDebounce?.Cancel();
+        ResetAutomaticRecognitionPolicy();
         _ = CompleteActiveExcludedSoftwareVisit(signedOutUtc);
         if (RunningEntry is null)
         {
@@ -2038,6 +2505,8 @@ public sealed class AppController : IAsyncDisposable
             case SystemSessionEvent.Suspending:
                 _systemAvailable = false;
                 _notificationService.DismissActive();
+                _recognitionDebounce?.Cancel();
+                ResetAutomaticRecognitionPolicy();
                 _ = CompleteActiveExcludedSoftwareVisit(nowUtc);
                 if (_idleCandidate is
                     {
@@ -2090,7 +2559,12 @@ public sealed class AppController : IAsyncDisposable
                 await ReviewExcludedSoftwareVisitsAsync(nowUtc);
                 await ShowPendingStoppedSessionEntryAsync();
                 await Task.Delay(300);
-                if (_foregroundMonitor.GetCurrentActivity() is { } activity)
+                if (AutomaticRecognitionEnabled)
+                {
+                    ResetAutomaticRecognitionPolicy();
+                    PollAutomaticForeground(force: true);
+                }
+                else if (_foregroundMonitor.GetCurrentActivity() is { } activity)
                 {
                     QueueActivity(activity);
                 }
@@ -2121,6 +2595,7 @@ public sealed class AppController : IAsyncDisposable
         RunningExcludedSeconds = 0;
         RunningEntryChanged?.Invoke(this, null);
         DataChanged?.Invoke(this, EventArgs.Empty);
+        ResetAutomaticRecognitionPolicy();
     }
 
     private async Task StopRunningForSignOutAsync(DateTimeOffset stoppedUtc)
@@ -2137,6 +2612,7 @@ public sealed class AppController : IAsyncDisposable
         RunningEntry = null;
         RunningExcludedSeconds = 0;
         _signOutPrepared = true;
+        ResetAutomaticRecognitionPolicy();
     }
 
     private async Task ShowPendingStoppedSessionEntryAsync()
@@ -2255,6 +2731,21 @@ public sealed class AppController : IAsyncDisposable
             MessageBoxResult.Yes);
 
     internal void ObserveActivityForPreview(WindowActivity activity) => QueueActivity(activity);
+
+    internal async Task AdvanceAutomaticRecognitionForPreviewAsync(double seconds)
+    {
+        await _automaticRecognitionGate.WaitAsync();
+        try
+        {
+            await ProcessAutomaticRecognitionActionsLockedAsync(
+                _clock.MonotonicSeconds + Math.Max(0, seconds),
+                CancellationToken.None);
+        }
+        finally
+        {
+            _automaticRecognitionGate.Release();
+        }
+    }
 
     internal void BeginIdleForPreview(DateTimeOffset startedUtc) =>
         OnIdleStarted(this, startedUtc);
@@ -2643,16 +3134,23 @@ public sealed class AppController : IAsyncDisposable
         _breakReminderEntryBaselineSeconds = CurrentRunningElapsedSeconds();
     }
 
-    private void CompleteBreakReminderEntry()
+    private void CompleteBreakReminderEntry(DateTimeOffset? endedUtc = null)
     {
         if (RunningEntry is null || _breakReminderEntryId != RunningEntry.Id)
         {
             return;
         }
 
+        var elapsedSeconds = endedUtc is null
+            ? CurrentRunningElapsedSeconds()
+            : Math.Max(
+                0,
+                (long)Math.Floor(
+                    (endedUtc.Value.ToUniversalTime() - RunningEntry.StartUtc).TotalSeconds) -
+                RunningExcludedSeconds);
         _breakReminderCompletedSeconds += Math.Max(
             0,
-            CurrentRunningElapsedSeconds() - _breakReminderEntryBaselineSeconds);
+            elapsedSeconds - _breakReminderEntryBaselineSeconds);
     }
 
     private void EnsureBreakReminderEntry()
@@ -2675,6 +3173,12 @@ public sealed class AppController : IAsyncDisposable
     {
         _ = sender;
         _ = e;
+        if (AutomaticRecognitionEnabled && _systemAvailable && !_idleMonitor.IsIdle)
+        {
+            PollAutomaticForeground();
+            _ = ProcessAutomaticRecognitionActionsAsync();
+        }
+
         TimerTick?.Invoke(this, EventArgs.Empty);
         _ = TryShowBreakReminderAsync();
     }
@@ -2687,6 +3191,15 @@ public sealed class AppController : IAsyncDisposable
         }
 
         return $"{Math.Max(1, (int)Math.Round(duration.TotalMinutes))} minutes";
+    }
+
+    private readonly record struct AutomaticForegroundKey(
+        nint Handle,
+        string Title,
+        string ProcessName)
+    {
+        public static AutomaticForegroundKey From(WindowActivity activity) =>
+            new(activity.Handle, activity.Title, activity.ProcessName);
     }
 
     private enum IdleCandidateKind

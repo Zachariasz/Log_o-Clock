@@ -37,6 +37,47 @@
             <Setter Property="Foreground" Value="{StaticResource ContentTertiaryBrush}" />
             <Setter Property="FontSize" Value="10" />
         </Style>
+        <Style x:Key="AutomaticModeTitleBarToggleStyle" TargetType="CheckBox">
+            <Setter Property="Width" Value="44" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="3,0,0,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent">
+                            <Border x:Name="Track" Width="36" Height="20"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Background="{StaticResource StatePressedBrush}"
+                                    BorderBrush="{StaticResource BorderHeavyBrush}"
+                                    BorderThickness="1" CornerRadius="10">
+                                <Ellipse x:Name="Thumb" Width="14" Height="14" Margin="2"
+                                         Fill="{StaticResource ContentSecondaryBrush}"
+                                         HorizontalAlignment="Left" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Track" Property="Background" Value="{StaticResource SuccessBrush}" />
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource SuccessBrush}" />
+                                <Setter TargetName="Thumb" Property="Fill" Value="#FF181818" />
+                                <Setter TargetName="Thumb" Property="HorizontalAlignment" Value="Right" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource StrongBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource StrongBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <DataTemplate x:Key="SidebarTargetRowTemplate">
             <Grid Margin="4,5,4,6">
                 <Grid.ColumnDefinitions>
@@ -350,6 +391,11 @@
                                   VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+                    <CheckBox x:Name="AutomaticRecognitionToggle"
+                              Style="{StaticResource AutomaticModeTitleBarToggleStyle}"
+                              Checked="AutomaticRecognitionToggle_Changed"
+                              Unchecked="AutomaticRecognitionToggle_Changed"
+                              AutomationProperties.Name="Full automatic project tracking" />
                 </StackPanel>
             </Border>
             <Grid Grid.Column="1">
@@ -2000,8 +2046,26 @@
                     <CheckBox x:Name="RecognitionCheck" Margin="0,24,0,8" Content="Recognize configured projects from active window titles"
                               Style="{StaticResource ToggleSwitchStyle}"
                               Checked="RecognitionCheck_Changed" Unchecked="RecognitionCheck_Changed" />
-                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
                                 Text="Window titles are matched in memory and unknown titles are never stored. The app has no telemetry; network access occurs only for Trello or Google Sheets connections configured in this profile." />
+                    <TextBlock Text="Full automatic mode grace period"
+                               FontWeight="SemiBold" Margin="0,28,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <TextBox x:Name="AutomaticRecognitionGraceMinutesText"
+                                 Width="88"
+                                 HorizontalAlignment="Left"
+                                 LostKeyboardFocus="AutomaticRecognitionGraceMinutesText_LostKeyboardFocus"
+                                 PreviewKeyDown="AutomaticRecognitionGraceMinutesText_PreviewKeyDown"
+                                 ToolTip="Whole minutes from 1 to 1440"
+                                 AutomationProperties.Name="Automatic project tracking grace period in minutes" />
+                        <TextBlock Text="minutes" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource ContentSecondaryBrush}" />
+                    </StackPanel>
+                    <TextBlock Text="Use the unlabeled toggle beside the profile selector to enable full automatic mode. A stop or project switch becomes final after this delay but is saved at the original foreground-change time."
+                               TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="3,6,0,0" />
+                    <TextBlock x:Name="AutomaticRecognitionGraceValidationText"
+                               TextWrapping="Wrap" Foreground="{StaticResource DangerBrush}"
+                               Margin="3,5,0,0" Visibility="Collapsed" />
                     <TextBlock Text="Continue a matching recent entry when the gap is shorter than"
                                FontWeight="SemiBold" Margin="0,28,0,6" />
                     <StackPanel Orientation="Horizontal">

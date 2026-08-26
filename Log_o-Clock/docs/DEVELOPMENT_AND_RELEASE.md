@@ -73,6 +73,8 @@ Never run smoke mode without an isolated data directory on a machine containing 
 
 Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpanded`, `Projects`, `Targets`, `Tasks`, `Tags`, `Software`, `Rules`, `Reports`, `Settings`, `SettingsIntegrations`, `GoogleSheetsConnection`, and `SyncConflicts`.
 
+`PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATIC_RECOGNITION=true` uses a fixed foreground monitor to verify silent startup, same-project software continuation, deferred atomic switching, filename task inference, delayed stopping, and the title-bar automatic-mode control without waiting for the real grace period.
+
 Feature flags follow `PROJECT_TIME_TRACKER_SMOKE_VERIFY_<AREA>`. Current source contains checks for profiles, branding, English UI, tab-filter reset, timer/tray/task search, recognition start/switch/click-away, History filters/grouping/global column sorting/continue/overlap/view, Reports charts/selection/sorting/view, targets/debt/sidebar, software, idle/session/recovery, Trello UI, and entry-editor behaviours. `PROJECT_TIME_TRACKER_SMOKE_VERIFY_HISTORY_GLOBAL_SORT=true` exercises the Client and Project header handlers across multiple days and clients, then verifies that clearing sorting restores day grouping.
 
 Discover the authoritative list with:

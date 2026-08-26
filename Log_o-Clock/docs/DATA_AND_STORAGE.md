@@ -82,6 +82,10 @@ erDiagram
 
 Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-27 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
 
+Full automatic recognition requires no schema migration. Its profile-scoped preferences use the existing `Settings` table: `recognition.automatic.enabled` defaults to `false`, while `recognition.automatic.grace-minutes` defaults to `10` and accepts whole minutes from 1 through 1440. Both are stable settings eligible for whole-profile synchronization. Turning project recognition off also persists automatic mode as disabled.
+
+The provisional automatic-recognition timeline is deliberately runtime-only. Foreground visits, unresolved matches, pending stop/switch deadlines, and remembered boundary observations are not written to SQLite and do not survive shutdown or crash recovery. Only a finalized timer start, stop, or switch is persisted, using the remembered UTC foreground-change time.
+
 ## Important constraints
 
 - Client names are case-insensitively unique.
@@ -111,6 +115,8 @@ The Unassigned project supports tray starts without choosing a project. UI proje
 `SqliteTrackerStore` refreshes derived files after mutations that can change historical output: entry changes, exclusions, names, rates, tags, software labels/associations, destructive removal, Trello reconciliation, and recovery.
 
 The refresh is guarded by `_monthlyLogSync` and runs after database transactions close. Do not call it while holding an SQLite transaction because it opens a new connection and would risk lock contention.
+
+Automatic stop/switch finalization uses `TransitionRunningTimerAsync`. It atomically stops the expected running entry and optionally starts its successor at the same or a later UTC time, preserves call state across a project switch, retains the one-running-entry invariant, applies net sub-minute cleanup, removes newly unused notification-created tasks, and refreshes derived files once after commit.
 
 ### Local export mode
 
