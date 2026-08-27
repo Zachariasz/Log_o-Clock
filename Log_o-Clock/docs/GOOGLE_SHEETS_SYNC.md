@@ -11,13 +11,13 @@ Settings offers two connection modes:
 
 The app opens immediately with local data and reconciles in the background. A local mutation queues synchronization after a short debounce. The one-minute device loop also maintains presence and retries after authentication, connectivity, quota, or transient API failures. Tracking and local editing remain available while Google is unreachable.
 
-Every computer sharing a spreadsheet must run a schema-27, synchronization-protocol-1 compatible release. An older export-only client must not write to an upgraded spreadsheet.
+Every computer sharing a spreadsheet must run a schema-28, synchronization-protocol-2 compatible release. An older export-only client must not write to an upgraded spreadsheet.
 
 ## Shared and device-local data
 
 The shared profile includes:
 
-- Completed time entries, including raw UTC start/end values, project/task identity, description, pending/source state, paid/call state, stable creation time, modification time, exact exclusions, and associated configured software.
+- Completed time entries, including raw UTC start/end values, project/task identity, description, pending/source state, paid/call state, stable creation time, modification time, exact exclusions, associated configured software, and exact configured-software foreground intervals.
 - Clients, projects, saved tasks, tags, software definitions and assignments, and recognition rules.
 - Targets, target-debt adjustments, Trello board/list mappings, and external task links.
 - Stable profile preferences, History/Reports layouts, and the shared profile name.

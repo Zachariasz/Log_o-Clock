@@ -218,6 +218,21 @@ public sealed record ClientReportSummaryRow(
         $"{seconds / 3600}:{seconds % 3600 / 60:00}";
 }
 
+public sealed record SoftwareReportSummaryRow(
+    Guid SoftwareId,
+    string Label,
+    string ProcessName,
+    string Color,
+    long TotalSeconds,
+    double Percentage)
+{
+    public string Share => $"{Percentage:0.#}%";
+    public string LegendDetail => $"{ProcessName} · {FormatHoursMinutes(TotalSeconds)} h · {Share}";
+
+    private static string FormatHoursMinutes(long seconds) =>
+        $"{seconds / 3600}:{seconds % 3600 / 60:00}";
+}
+
 public sealed record ReportTaskSummaryRow(
     Guid ProjectId,
     Guid? TaskId,

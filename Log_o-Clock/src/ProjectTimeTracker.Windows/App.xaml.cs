@@ -2518,6 +2518,14 @@ public partial class App : System.Windows.Application
                 }
 
                 if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_REPORT_SOFTWARE_CHART"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    _mainWindow.VerifyReportSoftwareChartForPreview();
+                }
+
+                if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_POPUP_TASK_SYNC"),
                         "true",
                         StringComparison.OrdinalIgnoreCase))

@@ -31,6 +31,7 @@ public sealed partial class SqliteTrackerStore
         new("ExternalTaskLinks", "ExternalTaskLinks", ["Provider", "ExternalId"], ["Provider", "ExternalId", "TaskId", "MappingId", "BoardId", "ListId", "WebUrl", "State", "RemoteModifiedUtc"], 60),
         new("TimeEntries", "TimeEntries", ["Id"], ["Id", "ProjectId", "TaskId", "Description", "StartUtc", "EndUtc", "LastCheckpointUtc", "DetailsPending", "Source", "CreatedUtc", "ModifiedUtc", "IsPaid", "IsCall"], 70),
         new("TimeEntrySoftware", "TimeEntrySoftware", ["TimeEntryId", "SoftwareId"], ["TimeEntryId", "SoftwareId"], 80),
+        new("TimeEntrySoftwareIntervals", "TimeEntrySoftwareIntervals", ["Id"], ["Id", "TimeEntryId", "SoftwareId", "StartUtc", "EndUtc"], 80),
         new("TimeExclusions", "TimeExclusions", ["Id"], ["Id", "TimeEntryId", "StartUtc", "EndUtc", "Reason"], 80),
         new("Settings", "Settings", ["Key"], ["Key", "Value"], 90),
     ];
@@ -154,6 +155,7 @@ public sealed partial class SqliteTrackerStore
                 // Associations may have been observed while the timer was still running and therefore
                 // intentionally skipped by an earlier capture. Re-scan them when the entry completes.
                 dirtyTables.Add("TimeEntrySoftware");
+                dirtyTables.Add("TimeEntrySoftwareIntervals");
                 dirtyTables.Add("TimeExclusions");
             }
             var physicalIds = rows.Select(row => row.EntityId).ToHashSet(StringComparer.Ordinal);
@@ -755,7 +757,7 @@ public sealed partial class SqliteTrackerStore
             ("$id", conflictId.ToString("D")));
         if (duplicatedEntry)
         {
-            foreach (var table in new[] { "TimeEntries", "TimeEntrySoftware", "TimeExclusions" })
+            foreach (var table in new[] { "TimeEntries", "TimeEntrySoftware", "TimeEntrySoftwareIntervals", "TimeExclusions" })
             {
                 await ExecuteInTransactionAsync(
                     connection,
@@ -1235,6 +1237,11 @@ public sealed partial class SqliteTrackerStore
             transaction,
             entryId,
             cancellationToken);
+        values["__SoftwareIntervals"] = await ReadEntrySoftwareIntervalPayloadsAsync(
+            connection,
+            transaction,
+            entryId,
+            cancellationToken);
         return JsonSerializer.Serialize(new SortedDictionary<string, object?>(values, StringComparer.Ordinal));
     }
 
@@ -1282,6 +1289,31 @@ public sealed partial class SqliteTrackerStore
         return result;
     }
 
+    private static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadEntrySoftwareIntervalPayloadsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid entryId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT Id, SoftwareId, StartUtc, EndUtc FROM TimeEntrySoftwareIntervals WHERE TimeEntryId = $entry ORDER BY StartUtc, Id;";
+        command.Parameters.AddWithValue("$entry", entryId.ToString("D"));
+        var result = new List<IReadOnlyDictionary<string, object?>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new SortedDictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["EndUtc"] = reader.IsDBNull(3) ? null : reader.GetString(3),
+                ["Id"] = reader.GetString(0),
+                ["SoftwareId"] = reader.GetString(1),
+                ["StartUtc"] = reader.GetString(2),
+            });
+        }
+        return result;
+    }
+
     private static bool ShouldIgnoreSyncRow(
         SyncTableDescriptor descriptor,
         IReadOnlyDictionary<string, object?> values)
@@ -1310,6 +1342,7 @@ public sealed partial class SqliteTrackerStore
             return values["EndUtc"] is not null;
         }
         if (string.Equals(descriptor.EntityType, "TimeEntrySoftware", StringComparison.Ordinal) ||
+            string.Equals(descriptor.EntityType, "TimeEntrySoftwareIntervals", StringComparison.Ordinal) ||
             string.Equals(descriptor.EntityType, "TimeExclusions", StringComparison.Ordinal))
         {
             return !runningEntryIds.Contains(values["TimeEntryId"]?.ToString() ?? string.Empty);
@@ -1668,6 +1701,58 @@ public sealed partial class SqliteTrackerStore
                     cancellationToken,
                     ("$entry", entryId),
                     ("$software", softwareId));
+            }
+        }
+
+        if (document.RootElement.TryGetProperty("__SoftwareIntervals", out var intervalElement))
+        {
+            if (intervalElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidDataException("The synchronized software interval list is invalid.");
+            }
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "DELETE FROM TimeEntrySoftwareIntervals WHERE TimeEntryId = $entry;",
+                cancellationToken,
+                ("$entry", entryId));
+            foreach (var item in intervalElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("Id", out var idElement) ||
+                    !item.TryGetProperty("SoftwareId", out var softwareIdElement) ||
+                    !item.TryGetProperty("StartUtc", out var startElement) ||
+                    !item.TryGetProperty("EndUtc", out var endElement))
+                {
+                    throw new InvalidDataException("A synchronized software interval is incomplete.");
+                }
+                var intervalId = idElement.GetString();
+                var softwareId = softwareIdElement.GetString();
+                var startUtc = startElement.GetString();
+                var endUtc = endElement.ValueKind == JsonValueKind.String ? endElement.GetString() : null;
+                if (string.IsNullOrWhiteSpace(intervalId) ||
+                    string.IsNullOrWhiteSpace(softwareId) ||
+                    string.IsNullOrWhiteSpace(startUtc) ||
+                    string.IsNullOrWhiteSpace(endUtc))
+                {
+                    throw new InvalidDataException("A synchronized software interval contains an invalid value.");
+                }
+                softwareId = await ResolveSyncAliasAsync(
+                    connection,
+                    transaction,
+                    "Software",
+                    softwareId,
+                    cancellationToken);
+                await ExecuteInTransactionAsync(
+                    connection,
+                    transaction,
+                    "INSERT INTO TimeEntrySoftwareIntervals (Id, TimeEntryId, SoftwareId, StartUtc, EndUtc) VALUES ($id, $entry, $software, $start, $end);",
+                    cancellationToken,
+                    ("$id", intervalId),
+                    ("$entry", entryId),
+                    ("$software", softwareId),
+                    ("$start", startUtc),
+                    ("$end", endUtc));
             }
         }
 
@@ -2041,6 +2126,7 @@ public sealed partial class SqliteTrackerStore
         values["ModifiedUtc"] = Format(resolvedUtc);
         values["LastCheckpointUtc"] = values["EndUtc"];
         var hasSoftwarePayload = false;
+        var hasSoftwareIntervalPayload = false;
         var hasExclusionPayload = false;
         using (var document = JsonDocument.Parse(payloadJson))
         {
@@ -2053,6 +2139,25 @@ public sealed partial class SqliteTrackerStore
                     .Select(item => item.GetString())
                     .Where(item => !string.IsNullOrWhiteSpace(item))
                     .ToArray();
+            }
+            if (document.RootElement.TryGetProperty("__SoftwareIntervals", out var intervalElement) &&
+                intervalElement.ValueKind == JsonValueKind.Array)
+            {
+                hasSoftwareIntervalPayload = true;
+                var duplicateIntervals = new List<IReadOnlyDictionary<string, object?>>();
+                foreach (var item in intervalElement.EnumerateArray())
+                {
+                    duplicateIntervals.Add(new SortedDictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["EndUtc"] = item.GetProperty("EndUtc").ValueKind == JsonValueKind.String
+                            ? item.GetProperty("EndUtc").GetString()
+                            : null,
+                        ["Id"] = Guid.NewGuid().ToString("D"),
+                        ["SoftwareId"] = item.GetProperty("SoftwareId").GetString(),
+                        ["StartUtc"] = item.GetProperty("StartUtc").GetString(),
+                    });
+                }
+                values["__SoftwareIntervals"] = duplicateIntervals;
             }
             if (document.RootElement.TryGetProperty("__Exclusions", out var exclusionsElement) &&
                 exclusionsElement.ValueKind == JsonValueKind.Array)
@@ -2115,6 +2220,24 @@ public sealed partial class SqliteTrackerStore
                        substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
                        $duplicate, StartUtc, EndUtc, Reason
                 FROM TimeExclusions WHERE TimeEntryId = $original;
+                """,
+                cancellationToken,
+                ("$duplicate", duplicateId.ToString("D")),
+                ("$original", originalId.ToString("D")));
+        }
+        if (Guid.TryParse(originalEntityId, out originalId) && !hasSoftwareIntervalPayload)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                """
+                INSERT INTO TimeEntrySoftwareIntervals (Id, TimeEntryId, SoftwareId, StartUtc, EndUtc)
+                SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+                       substr(lower(hex(randomblob(2))), 2) || '-' ||
+                       substr('89ab', abs(random()) % 4 + 1, 1) ||
+                       substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6))),
+                       $duplicate, SoftwareId, StartUtc, EndUtc
+                FROM TimeEntrySoftwareIntervals WHERE TimeEntryId = $original;
                 """,
                 cancellationToken,
                 ("$duplicate", duplicateId.ToString("D")),

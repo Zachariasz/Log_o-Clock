@@ -155,7 +155,7 @@ flowchart TD
     Controller --> SessionMode{"Stop or keep + exclude"}
 ```
 
-The 30-second monitor threshold makes short inactivity observable; it is not the long-idle review threshold. Real idle intervals under five minutes can accumulate in the rolling four-hour policy. Five minutes or more is reviewed independently. Excluded software and Windows-unavailable intervals are separate sources and never enter the short-idle total.
+The 30-second monitor threshold makes short inactivity observable; it is not the long-idle review threshold. Real idle intervals under five minutes can accumulate in the rolling four-hour policy. Five minutes or more is reviewed independently. Excluded software and Windows-unavailable intervals are separate sources and never enter the short-idle total. Configured non-excluded foreground software is recorded as UTC intervals only while a timer runs; unknown processes remain memory-only, and report totals subtract overlapping exclusions.
 
 Audio/video protection is output-only. It uses Windows render sessions, communications ducking state, and Global System Media Transport Controls. It never opens microphone capture devices.
 
@@ -193,4 +193,4 @@ flowchart LR
 - Google Sheets is a two-way whole-profile revision transport; SQLite remains the local operational store and visible daily tabs are never imported as authoritative rows.
 - Neither integration replaces SQLite as the running application's source of truth.
 
-See [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) for the schema-27 local state, hidden worksheet contracts, revision graph, conflict resolution, and device-presence lifecycle.
+See [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) for the schema-28/protocol-2 local state, hidden worksheet contracts, revision graph, conflict resolution, and device-presence lifecycle.

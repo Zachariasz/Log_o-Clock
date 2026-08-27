@@ -51,7 +51,7 @@ If the root is not overridden, startup can copy the legacy `%LocalAppData%\Proje
 - Connection mode: read/write/create, shared cache, foreign keys enabled.
 - Runtime pragmas: foreign keys on, WAL journal mode, 5-second busy timeout.
 - Timestamps: UTC ISO round-trip text.
-- Current `PRAGMA user_version`: **27**.
+- Current `PRAGMA user_version`: **28**.
 - Upgrade: before an existing older database is changed, a sibling `TimeTracker.db.backup-v<old>-<timestamp>` is created.
 - Initialization also ensures system entities, removes invalid sub-minute completed entries and unused notification-created tasks, synchronizes tag definitions from descriptions, and refreshes derived files.
 
@@ -66,6 +66,8 @@ erDiagram
     TIME_ENTRIES ||--o{ TIME_EXCLUSIONS : subtracts
     TIME_ENTRIES ||--o{ TIME_ENTRY_SOFTWARE : used
     SOFTWARE ||--o{ TIME_ENTRY_SOFTWARE : labels
+    TIME_ENTRIES ||--o{ TIME_ENTRY_SOFTWARE_INTERVALS : foreground_time
+    SOFTWARE ||--o{ TIME_ENTRY_SOFTWARE_INTERVALS : measured_for
     PROJECTS ||--o{ RECOGNITION_RULES : recognized_by
     PROJECTS o|--o{ CUSTOM_TARGETS : scopes
     PROJECTS ||--o{ PROJECT_TARGET_DEBT_CANCELLATIONS : adjusts
@@ -80,7 +82,7 @@ erDiagram
     SAVED_TASKS o|--o| EXTERNAL_TASK_LINKS : linked
 ```
 
-Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-27 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
+Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-28 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
 
 Full automatic recognition requires no schema migration. Its profile-scoped preferences use the existing `Settings` table: `recognition.automatic.enabled` defaults to `false`, while `recognition.automatic.grace-minutes` defaults to `10` and accepts whole minutes from 1 through 1440. Both are stable settings eligible for whole-profile synchronization. Turning project recognition off also persists automatic mode as disabled.
 
@@ -148,7 +150,7 @@ The service:
 - Rebuilds app-managed `yyyy-MM-dd` daily views globally by `EntryId`, in the profile's pinned worksheet time zone. They include call, creation, and modification timestamps with offsets; manual visible-sheet edits are overwritten.
 - Archives pre-protocol daily rows to `Legacy Review`. Rows absent from the owning SQLite store become one-time Import/Ignore conflicts because they have no trustworthy revision history.
 
-`CreatedUtc` is stable across edits. `ModifiedUtc` advances for meaningful entry changes, exclusions, and software associations, but not for 30-second timer checkpoints. All participating computers must run the schema-27, protocol-1 sync-capable version before joining the same spreadsheet.
+`CreatedUtc` is stable across edits. `ModifiedUtc` advances for meaningful entry changes, exclusions, software associations, and exact configured-software intervals, but not for 30-second timer checkpoints. All participating computers must run the schema-28, protocol-2 sync-capable version before joining the same spreadsheet.
 
 ## Trello data direction
 
@@ -181,7 +183,7 @@ Every destructive path must refresh derived exports. Synchronization triggers re
 
 - No telemetry or app account.
 - Raw observed window titles are processed only in memory.
-- Process names can be stored only as configured Software definitions or entry associations while tracking.
+- Process names can be stored only as configured Software definitions, entry associations, or exact intervals linked to those definitions. Unknown observations remain memory-only.
 - Audio/video protection stores no sessions, media metadata, observations, or history. A user may explicitly mark a time-entry segment as a call; only that marker and its project-linked duration are stored.
 - Trello and Google are contacted only when configured for the active profile.
 - Credential values must never enter SQLite, logs, CSV, error strings, URLs used for authenticated API requests, or screenshots.

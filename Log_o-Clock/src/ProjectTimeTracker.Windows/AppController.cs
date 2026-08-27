@@ -40,6 +40,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly SemaphoreSlim _targetReviewGate = new(1, 1);
     private readonly SemaphoreSlim _breakReminderGate = new(1, 1);
     private readonly SemaphoreSlim _automaticRecognitionGate = new(1, 1);
+    private readonly SemaphoreSlim _softwareUsageGate = new(1, 1);
     private IReadOnlyList<RecognitionCandidate> _recognitionCandidates = [];
     private IReadOnlyDictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition> _projectSoftware =
         new Dictionary<(Guid ProjectId, string ProcessName), ProjectSoftwareDefinition>();
@@ -49,6 +50,7 @@ public sealed class AppController : IAsyncDisposable
     private WindowActivity? _lastExternalActivity;
     private WindowActivity? _lastTrackableActivity;
     private AutomaticForegroundKey? _lastAutomaticForegroundKey;
+    private SoftwareForegroundKey? _lastSoftwareForegroundKey;
     private bool _automaticForegroundSnapshotInitialized;
     private IdleCandidate? _idleCandidate;
     private readonly Dictionary<string, ExcludedSoftwareReview> _excludedSoftwareReviews =
@@ -288,6 +290,7 @@ public sealed class AppController : IAsyncDisposable
     public async Task ReloadSoftwareSettingsAsync(CancellationToken cancellationToken = default)
     {
         await ReloadSoftwareSettingsCoreAsync(cancellationToken);
+        QueueCurrentSoftwareUsage(force: true);
         DataChanged?.Invoke(this, EventArgs.Empty);
         if (AutomaticRecognitionEnabled)
         {
@@ -1097,6 +1100,7 @@ public sealed class AppController : IAsyncDisposable
         DataChanged?.Invoke(this, EventArgs.Empty);
         if (previousProjectId is not null && previousProjectId != projectId)
         {
+            QueueCurrentSoftwareUsage(force: true);
             ReconcileAutomaticRecognitionAfterTimerMutation();
         }
     }
@@ -1131,6 +1135,7 @@ public sealed class AppController : IAsyncDisposable
         _idleReviewGate.Dispose();
         _targetReviewGate.Dispose();
         _automaticRecognitionGate.Dispose();
+        _softwareUsageGate.Dispose();
         await _store.DisposeAsync();
     }
 
@@ -1165,6 +1170,7 @@ public sealed class AppController : IAsyncDisposable
         {
             QueueRecognition(activity);
         }
+        QueueSoftwareUsageObservation(activity, force: false, notify: true);
         if (RunningEntry is { } runningEntry &&
             TryGetExcludedSoftware(runningEntry.ProjectId, activity.ProcessName, out var excludedSoftware))
         {
@@ -1650,10 +1656,6 @@ public sealed class AppController : IAsyncDisposable
         }
 
         _lastTrackableActivity = activity;
-        if (RunningEntry is { } entry)
-        {
-            _ = RecordSoftwareAsync(entry.Id, activity.ProcessName, notify: true, CancellationToken.None);
-        }
     }
 
     private async Task RecordInitialSoftwareAsync(
@@ -1683,19 +1685,26 @@ public sealed class AppController : IAsyncDisposable
         }
         else
         {
-            await RecordSoftwareAsync(entryId, activity.ProcessName, notify: false, cancellationToken);
+            await TransitionSoftwareUsageAsync(
+                entryId,
+                activity.ProcessName,
+                _clock.UtcNow,
+                notify: false,
+                cancellationToken);
         }
     }
 
-    private async Task RecordSoftwareAsync(
+    private async Task TransitionSoftwareUsageAsync(
         Guid entryId,
-        string processName,
+        string? processName,
+        DateTimeOffset observedUtc,
         bool notify,
         CancellationToken cancellationToken)
     {
+        await _softwareUsageGate.WaitAsync(cancellationToken);
         try
         {
-            if (await _store.RecordSoftwareUsageAsync(entryId, processName, cancellationToken) && notify)
+            if (await _store.TransitionSoftwareUsageAsync(entryId, processName, observedUtc, cancellationToken) && notify)
             {
                 DataChanged?.Invoke(this, EventArgs.Empty);
             }
@@ -1707,6 +1716,49 @@ public sealed class AppController : IAsyncDisposable
         {
             Debug.WriteLine(exception);
         }
+        finally
+        {
+            _softwareUsageGate.Release();
+        }
+    }
+
+    private void QueueSoftwareUsageObservation(
+        WindowActivity? activity,
+        bool force,
+        bool notify)
+    {
+        if (RunningEntry is not { } entry)
+        {
+            _lastSoftwareForegroundKey = null;
+            return;
+        }
+
+        var processName = activity is not null && IsTrackableProcess(activity.ProcessName)
+            ? activity.ProcessName
+            : null;
+        var key = new SoftwareForegroundKey(
+            entry.Id,
+            processName is null ? null : NormalizeProcessName(processName));
+        if (!force && _lastSoftwareForegroundKey == key)
+        {
+            return;
+        }
+
+        _lastSoftwareForegroundKey = key;
+        _ = TransitionSoftwareUsageAsync(
+            entry.Id,
+            processName,
+            activity?.ObservedUtc ?? _clock.UtcNow,
+            notify,
+            CancellationToken.None);
+    }
+
+    private void QueueCurrentSoftwareUsage(bool force = false)
+    {
+        QueueSoftwareUsageObservation(
+            _foregroundMonitor.GetCurrentActivity(),
+            force,
+            notify: false);
     }
 
     private static bool IsTrackableProcess(string processName) =>
@@ -2086,9 +2138,10 @@ public sealed class AppController : IAsyncDisposable
         AutomaticRecognitionVisit visit,
         CancellationToken cancellationToken) =>
         visit.Activity is { } activity && IsTrackableProcess(activity.ProcessName)
-            ? RecordSoftwareAsync(
+            ? TransitionSoftwareUsageAsync(
                 entryId,
                 activity.ProcessName,
+                activity.ObservedUtc,
                 notify: false,
                 cancellationToken: cancellationToken)
             : Task.CompletedTask;
@@ -2480,6 +2533,13 @@ public sealed class AppController : IAsyncDisposable
             return;
         }
 
+        await TransitionSoftwareUsageAsync(
+            RunningEntry.Id,
+            processName: null,
+            signedOutUtc,
+            notify: false,
+            CancellationToken.None);
+
         if (SessionTrackingBehavior == SessionTrackingBehavior.StopTimer)
         {
             await StopRunningForSignOutAsync(signedOutUtc);
@@ -2508,6 +2568,15 @@ public sealed class AppController : IAsyncDisposable
                 _recognitionDebounce?.Cancel();
                 ResetAutomaticRecognitionPolicy();
                 _ = CompleteActiveExcludedSoftwareVisit(nowUtc);
+                if (RunningEntry is { } activeEntry)
+                {
+                    await TransitionSoftwareUsageAsync(
+                        activeEntry.Id,
+                        processName: null,
+                        nowUtc,
+                        notify: false,
+                        CancellationToken.None);
+                }
                 if (_idleCandidate is
                     {
                         Kind: IdleCandidateKind.Idle,
@@ -2559,6 +2628,7 @@ public sealed class AppController : IAsyncDisposable
                 await ReviewExcludedSoftwareVisitsAsync(nowUtc);
                 await ShowPendingStoppedSessionEntryAsync();
                 await Task.Delay(300);
+                QueueCurrentSoftwareUsage(force: true);
                 if (AutomaticRecognitionEnabled)
                 {
                     ResetAutomaticRecognitionPolicy();
@@ -3173,6 +3243,10 @@ public sealed class AppController : IAsyncDisposable
     {
         _ = sender;
         _ = e;
+        if (_systemAvailable)
+        {
+            QueueCurrentSoftwareUsage();
+        }
         if (AutomaticRecognitionEnabled && _systemAvailable && !_idleMonitor.IsIdle)
         {
             PollAutomaticForeground();
@@ -3201,6 +3275,10 @@ public sealed class AppController : IAsyncDisposable
         public static AutomaticForegroundKey From(WindowActivity activity) =>
             new(activity.Handle, activity.Title, activity.ProcessName);
     }
+
+    private readonly record struct SoftwareForegroundKey(
+        Guid EntryId,
+        string? ProcessName);
 
     private enum IdleCandidateKind
     {

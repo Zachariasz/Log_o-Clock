@@ -6,7 +6,7 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed partial class SqliteTrackerStore : ITrackerStore
 {
-    private const int SchemaVersion = 27;
+    private const int SchemaVersion = 28;
     private static readonly TimeSpan MinimumEntryDuration = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly TimeZoneInfo _monthlyLogTimeZone;
@@ -212,6 +212,15 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                     cancellationToken) == 0)
             {
                 await ExecuteAsync(connection, MigrationV26Sql, cancellationToken);
+            }
+
+            if (version < 28 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'TimeEntrySoftwareIntervals';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV28Sql, cancellationToken);
             }
 
             await ExecuteAsync(connection, SchemaV21IndexesSql, cancellationToken);
@@ -4082,20 +4091,17 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                       (s.IsGlobal = 1 AND s.IsExcluded = 0)
                       OR
                       (s.IsGlobal = 0 AND EXISTS (
-                          SELECT 1
-                          FROM ProjectSoftwareSettings ps
+                          SELECT 1 FROM ProjectSoftwareSettings ps
                           WHERE ps.ProjectId = e.ProjectId
                             AND ps.SoftwareId = s.Id
                             AND ps.IsExcluded = 0
                       ))
-                  )
-                ;
+                  );
                 """;
             command.Parameters.AddWithValue("$entry", entryId.ToString("D"));
             command.Parameters.AddWithValue("$process", processName);
             inserted = await command.ExecuteNonQueryAsync(cancellationToken);
         }
-
         if (inserted > 0)
         {
             await ExecuteInTransactionAsync(
@@ -4106,15 +4112,159 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                 ("$modified", Format(DateTimeOffset.UtcNow)),
                 ("$entry", entryId.ToString("D")));
         }
-
         transaction.Commit();
         await connection.CloseAsync();
         if (inserted > 0)
         {
             await SynchronizeMonthlyLogFilesAsync(cancellationToken);
         }
-
         return inserted > 0;
+    }
+
+    public async Task<bool> TransitionSoftwareUsageAsync(
+        Guid entryId,
+        string? processName,
+        DateTimeOffset observedUtc,
+        CancellationToken cancellationToken = default)
+    {
+        processName = string.IsNullOrWhiteSpace(processName)
+            ? null
+            : NormalizeProcessName(processName);
+        observedUtc = observedUtc.ToUniversalTime();
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        string? desiredSoftwareId = null;
+        if (processName is not null)
+        {
+            await using var desiredCommand = connection.CreateCommand();
+            desiredCommand.Transaction = transaction;
+            desiredCommand.CommandText = """
+                SELECT s.Id
+                FROM Software s
+                JOIN TimeEntries e ON e.Id = $entry
+                WHERE e.EndUtc IS NULL
+                  AND e.StartUtc <= $observed
+                  AND s.ProcessName = $process
+                  AND s.IsHidden = 0
+                  AND (
+                      (s.IsGlobal = 1 AND s.IsExcluded = 0)
+                      OR
+                      (s.IsGlobal = 0 AND EXISTS (
+                          SELECT 1
+                          FROM ProjectSoftwareSettings ps
+                          WHERE ps.ProjectId = e.ProjectId
+                            AND ps.SoftwareId = s.Id
+                            AND ps.IsExcluded = 0
+                      ))
+                  )
+                LIMIT 1;
+                """;
+            desiredCommand.Parameters.AddWithValue("$entry", entryId.ToString("D"));
+            desiredCommand.Parameters.AddWithValue("$observed", Format(observedUtc));
+            desiredCommand.Parameters.AddWithValue("$process", processName);
+            desiredSoftwareId = (string?)await desiredCommand.ExecuteScalarAsync(cancellationToken);
+        }
+
+        string? activeIntervalId = null;
+        string? activeEntryId = null;
+        string? activeSoftwareId = null;
+        DateTimeOffset? activeStartUtc = null;
+        await using (var activeCommand = connection.CreateCommand())
+        {
+            activeCommand.Transaction = transaction;
+            activeCommand.CommandText = """
+                SELECT Id, TimeEntryId, SoftwareId, StartUtc
+                FROM TimeEntrySoftwareIntervals
+                WHERE EndUtc IS NULL
+                LIMIT 1;
+                """;
+            await using var reader = await activeCommand.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                activeIntervalId = reader.GetString(0);
+                activeEntryId = reader.GetString(1);
+                activeSoftwareId = reader.GetString(2);
+                activeStartUtc = Parse(reader.GetString(3));
+            }
+        }
+
+        var entryKey = entryId.ToString("D");
+        if (activeEntryId is not null &&
+            !string.Equals(activeEntryId, entryKey, StringComparison.OrdinalIgnoreCase) &&
+            desiredSoftwareId is null)
+        {
+            transaction.Commit();
+            return false;
+        }
+        if (activeStartUtc is { } startUtc && observedUtc <= startUtc)
+        {
+            transaction.Commit();
+            return false;
+        }
+        if (string.Equals(activeEntryId, entryKey, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(activeSoftwareId, desiredSoftwareId, StringComparison.OrdinalIgnoreCase))
+        {
+            transaction.Commit();
+            return false;
+        }
+
+        var changed = false;
+        if (activeIntervalId is not null)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "UPDATE TimeEntrySoftwareIntervals SET EndUtc = $observed WHERE Id = $id;",
+                cancellationToken,
+                ("$observed", Format(observedUtc)),
+                ("$id", activeIntervalId));
+            changed = true;
+        }
+
+        var associationInserted = false;
+        if (desiredSoftwareId is not null)
+        {
+            await using (var associationCommand = connection.CreateCommand())
+            {
+                associationCommand.Transaction = transaction;
+                associationCommand.CommandText =
+                    "INSERT OR IGNORE INTO TimeEntrySoftware (TimeEntryId, SoftwareId) VALUES ($entry, $software);";
+                associationCommand.Parameters.AddWithValue("$entry", entryKey);
+                associationCommand.Parameters.AddWithValue("$software", desiredSoftwareId);
+                associationInserted = await associationCommand.ExecuteNonQueryAsync(cancellationToken) > 0;
+            }
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "INSERT INTO TimeEntrySoftwareIntervals (Id, TimeEntryId, SoftwareId, StartUtc, EndUtc) VALUES ($id, $entry, $software, $start, NULL);",
+                cancellationToken,
+                ("$id", Guid.NewGuid().ToString("D")),
+                ("$entry", entryKey),
+                ("$software", desiredSoftwareId),
+                ("$start", Format(observedUtc)));
+            changed = true;
+        }
+
+        if (changed)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "UPDATE TimeEntries SET ModifiedUtc = $modified WHERE Id = $entry;",
+                cancellationToken,
+                ("$modified", Format(DateTimeOffset.UtcNow)),
+                ("$entry", entryKey));
+        }
+
+        transaction.Commit();
+        await connection.CloseAsync();
+        if (associationInserted)
+        {
+            await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+        }
+
+        return changed;
     }
 
     public Task<IReadOnlyList<TimeEntryView>> GetEntriesAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken = default) =>
@@ -4315,6 +4465,81 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             ("$tag", tag),
             ("$paid", paid),
             ("$unassigned", SystemEntityIds.UnassignedProjectId.ToString("D")));
+    }
+
+    public async Task<IReadOnlyList<SoftwareUsageSummary>> GetSoftwareUsageReportAsync(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        ReportFilter filter,
+        CancellationToken cancellationToken = default)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var tag = TagParser.Normalize(filter.Tag);
+        var taskMode = filter.UnassignedTaskOnly ? 2 : filter.TaskId is null ? 0 : 1;
+        var paid = filter.PaidStatus switch
+        {
+            PaidStatusFilter.Paid => 1,
+            PaidStatusFilter.Unpaid => 0,
+            _ => -1,
+        };
+        return await QueryAsync(
+            """
+            WITH IntervalDurations AS (
+                SELECT s.Id AS SoftwareId,
+                       s.Label,
+                       s.ProcessName,
+                       MAX(0,
+                           CAST(strftime('%s', MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                           - CAST(strftime('%s', MAX(i.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                           - COALESCE((
+                               SELECT SUM(MAX(0,
+                                   CAST(strftime('%s', MIN(x.EndUtc, COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                                   - CAST(strftime('%s', MAX(x.StartUtc, i.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                               ))
+                               FROM TimeExclusions x
+                               WHERE x.TimeEntryId = e.Id
+                                 AND x.StartUtc < MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)
+                                 AND x.EndUtc > MAX(i.StartUtc, e.StartUtc, $from)
+                           ), 0)
+                       ) AS DurationSeconds
+                FROM TimeEntrySoftwareIntervals i
+                JOIN Software s ON s.Id = i.SoftwareId AND s.IsHidden = 0
+                JOIN TimeEntries e ON e.Id = i.TimeEntryId
+                JOIN Projects p ON p.Id = e.ProjectId
+                JOIN Clients c ON c.Id = p.ClientId
+                WHERE i.StartUtc < MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)
+                  AND COALESCE(i.EndUtc, $now) > $from
+                  AND e.StartUtc < $to
+                  AND COALESCE(e.EndUtc, $now) > $from
+                  AND ($client IS NULL OR c.Id = $client)
+                  AND ($project IS NULL OR p.Id = $project)
+                  AND ($taskMode = 0
+                       OR ($taskMode = 1 AND e.TaskId = $task)
+                       OR ($taskMode = 2 AND e.TaskId IS NULL))
+                  AND ($tag IS NULL OR has_tag(e.Description, $tag))
+                  AND ($paid = -1 OR e.IsPaid = $paid)
+            )
+            SELECT SoftwareId, Label, ProcessName, CAST(SUM(DurationSeconds) AS INTEGER)
+            FROM IntervalDurations
+            GROUP BY SoftwareId, Label, ProcessName
+            HAVING SUM(DurationSeconds) > 0
+            ORDER BY SUM(DurationSeconds) DESC, Label COLLATE NOCASE, ProcessName COLLATE NOCASE;
+            """,
+            reader => new SoftwareUsageSummary(
+                Guid.Parse(reader.GetString(0)),
+                reader.GetString(1),
+                reader.GetString(2),
+                reader.GetInt64(3)),
+            cancellationToken,
+            ("$from", Format(fromUtc)),
+            ("$to", Format(toUtc)),
+            ("$now", Format(nowUtc)),
+            ("$client", filter.ClientId?.ToString("D")),
+            ("$project", filter.ProjectId?.ToString("D")),
+            ("$taskMode", taskMode),
+            ("$task", filter.TaskId?.ToString("D")),
+            ("$tag", tag),
+            ("$paid", paid));
     }
 
     public async Task<string?> GetSettingAsync(string key, CancellationToken cancellationToken = default)
@@ -5656,6 +5881,32 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         );
         CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftware_SoftwareId ON TimeEntrySoftware (SoftwareId);
 
+        CREATE TABLE IF NOT EXISTS TimeEntrySoftwareIntervals (
+            Id TEXT PRIMARY KEY,
+            TimeEntryId TEXT NOT NULL REFERENCES TimeEntries(Id) ON DELETE CASCADE,
+            SoftwareId TEXT NOT NULL REFERENCES Software(Id) ON DELETE CASCADE,
+            StartUtc TEXT NOT NULL,
+            EndUtc TEXT NULL,
+            CHECK (EndUtc IS NULL OR EndUtc > StartUtc)
+        );
+        CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftwareIntervals_TimeEntryId
+            ON TimeEntrySoftwareIntervals (TimeEntryId);
+        CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftwareIntervals_SoftwareId_StartUtc
+            ON TimeEntrySoftwareIntervals (SoftwareId, StartUtc);
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_TimeEntrySoftwareIntervals_OneOpen
+            ON TimeEntrySoftwareIntervals ((1)) WHERE EndUtc IS NULL;
+
+        CREATE TRIGGER IF NOT EXISTS TR_TimeEntries_CloseSoftwareIntervals
+        AFTER UPDATE OF EndUtc ON TimeEntries
+        WHEN NEW.EndUtc IS NOT NULL
+        BEGIN
+            DELETE FROM TimeEntrySoftwareIntervals
+            WHERE TimeEntryId = NEW.Id AND EndUtc IS NULL AND StartUtc >= NEW.EndUtc;
+            UPDATE TimeEntrySoftwareIntervals
+            SET EndUtc = NEW.EndUtc
+            WHERE TimeEntryId = NEW.Id AND EndUtc IS NULL AND StartUtc < NEW.EndUtc;
+        END;
+
         CREATE TABLE IF NOT EXISTS TimeExclusions (
             Id TEXT PRIMARY KEY,
             TimeEntryId TEXT NOT NULL REFERENCES TimeEntries(Id) ON DELETE CASCADE,
@@ -5899,6 +6150,33 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
     private const string MigrationV26Sql = """
         ALTER TABLE TimeEntries
         ADD COLUMN IsCall INTEGER NOT NULL DEFAULT 0 CHECK (IsCall IN (0, 1));
+        """;
+
+    private const string MigrationV28Sql = """
+        CREATE TABLE IF NOT EXISTS TimeEntrySoftwareIntervals (
+            Id TEXT PRIMARY KEY,
+            TimeEntryId TEXT NOT NULL REFERENCES TimeEntries(Id) ON DELETE CASCADE,
+            SoftwareId TEXT NOT NULL REFERENCES Software(Id) ON DELETE CASCADE,
+            StartUtc TEXT NOT NULL,
+            EndUtc TEXT NULL,
+            CHECK (EndUtc IS NULL OR EndUtc > StartUtc)
+        );
+        CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftwareIntervals_TimeEntryId
+            ON TimeEntrySoftwareIntervals (TimeEntryId);
+        CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftwareIntervals_SoftwareId_StartUtc
+            ON TimeEntrySoftwareIntervals (SoftwareId, StartUtc);
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_TimeEntrySoftwareIntervals_OneOpen
+            ON TimeEntrySoftwareIntervals ((1)) WHERE EndUtc IS NULL;
+        CREATE TRIGGER IF NOT EXISTS TR_TimeEntries_CloseSoftwareIntervals
+        AFTER UPDATE OF EndUtc ON TimeEntries
+        WHEN NEW.EndUtc IS NOT NULL
+        BEGIN
+            DELETE FROM TimeEntrySoftwareIntervals
+            WHERE TimeEntryId = NEW.Id AND EndUtc IS NULL AND StartUtc >= NEW.EndUtc;
+            UPDATE TimeEntrySoftwareIntervals
+            SET EndUtc = NEW.EndUtc
+            WHERE TimeEntryId = NEW.Id AND EndUtc IS NULL AND StartUtc < NEW.EndUtc;
+        END;
         """;
 
     private const string SchemaV21IndexesSql = """

@@ -106,6 +106,106 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SoftwareUsageReportTracksExactForegroundIntervalsAndSubtractsExclusions()
+    {
+        var client = await _store.AddClientAsync("Software report client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Software report project", "#223344");
+        var task = await _store.AddTaskAsync(project.Id, "Focused task");
+        var blender = await _store.AddSoftwareAsync("blender.exe", "Blender", project.Id, false, []);
+        var maya = await _store.AddSoftwareAsync("maya.exe", "Maya", project.Id, false, []);
+        var start = new DateTimeOffset(2026, 8, 26, 8, 0, 0, TimeSpan.Zero);
+        var entry = (await _store.StartOrResumeTimerAsync(
+            project.Id,
+            task.Id,
+            "#focus Software report",
+            TrackingSource.Manual,
+            start,
+            TimeSpan.Zero)).Entry;
+
+        Assert.True(await _store.TransitionSoftwareUsageAsync(entry.Id, "blender.exe", start.AddMinutes(10)));
+        Assert.True(await _store.TransitionSoftwareUsageAsync(entry.Id, "maya", start.AddMinutes(40)));
+        Assert.True(await _store.TransitionSoftwareUsageAsync(entry.Id, "unknown.exe", start.AddMinutes(70)));
+        await _store.StopRunningTimerAsync(start.AddMinutes(90));
+        await _store.AddExclusionsAsync(
+            entry.Id,
+            [
+                new TimeExclusionPeriod(start.AddMinutes(20), start.AddMinutes(25), "Idle"),
+                new TimeExclusionPeriod(start.AddMinutes(50), start.AddMinutes(55), "Idle"),
+            ]);
+
+        var report = await _store.GetSoftwareUsageReportAsync(
+            start,
+            start.AddMinutes(90),
+            new ReportFilter(ClientId: client.Id, ProjectId: project.Id, TaskId: task.Id, Tag: "focus"));
+        Assert.Collection(
+            report,
+            row =>
+            {
+                Assert.Equal(blender.Id, row.SoftwareId);
+                Assert.Equal("Blender", row.Label);
+                Assert.Equal(25 * 60, row.DurationSeconds);
+            },
+            row =>
+            {
+                Assert.Equal(maya.Id, row.SoftwareId);
+                Assert.Equal("Maya", row.Label);
+                Assert.Equal(25 * 60, row.DurationSeconds);
+            });
+        Assert.Empty(await _store.GetSoftwareUsageReportAsync(
+            start,
+            start.AddMinutes(90),
+            new ReportFilter(PaidStatus: PaidStatusFilter.Paid)));
+    }
+
+    [Fact]
+    public async Task LegacySoftwareAssociationsDoNotInventUsageDurations()
+    {
+        var client = await _store.AddClientAsync("Legacy software client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Legacy software project", "#223344");
+        var software = await _store.AddSoftwareAsync("legacy.exe", "Legacy app", project.Id, false, []);
+        var start = new DateTimeOffset(2026, 8, 25, 8, 0, 0, TimeSpan.Zero);
+        await _store.AddManualEntryAsync(project.Id, null, null, start, start.AddHours(1));
+        var entry = Assert.Single(await _store.GetEntriesAsync(start, start.AddHours(1)));
+
+        Assert.True(await _store.RecordSoftwareUsageAsync(entry.Id, software.ProcessName));
+        Assert.Empty(await _store.GetSoftwareUsageReportAsync(start, start.AddHours(1), new ReportFilter()));
+    }
+
+    [Fact]
+    public async Task VersionTwentySevenUpgradeCreatesSoftwareIntervalsAndBackup()
+    {
+        var directory = Path.Combine(_directory, "schema-28-upgrade");
+        var database = Path.Combine(directory, "TimeTracker.db");
+        await using (var oldStore = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc))
+        {
+            await oldStore.InitializeAsync();
+            _ = await oldStore.AddClientAsync("Upgrade client", "#112233");
+        }
+        await using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE TimeEntrySoftwareIntervals; PRAGMA user_version = 27;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await using (var upgraded = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc))
+        {
+            await upgraded.InitializeAsync();
+            Assert.Equal("Upgrade client", Assert.Single(await upgraded.GetClientsAsync()).Name);
+        }
+
+        await using var verify = new SqliteConnection($"Data Source={database}");
+        await verify.OpenAsync();
+        await using var verifyCommand = verify.CreateCommand();
+        verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'TimeEntrySoftwareIntervals';";
+        Assert.Equal(1L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        verifyCommand.CommandText = "PRAGMA user_version;";
+        Assert.Equal(28L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Single(Directory.GetFiles(directory, "TimeTracker.db.backup-v27-*"));
+    }
+
+    [Fact]
     public async Task TargetDurationMetricPersistsThroughAddUpdateAndProjectReplacement()
     {
         var (project, _) = await CreateTwoProjectsAsync();
@@ -3199,7 +3299,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         api.TechnicalRows["__LogOClockProfile"] =
         [
             ["Key", "Value"],
-            ["ProtocolVersion", "1"],
+            ["ProtocolVersion", GoogleSheetsSyncService.CurrentSyncProtocolVersion.ToString(CultureInfo.InvariantCulture)],
             ["ProfileId", sharedProfileId.ToString("D")],
             ["ProfileName", "Shared work"],
             ["PinnedTimeZoneId", TimeZoneInfo.Utc.Id],
@@ -3492,7 +3592,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         var started = new DateTimeOffset(2026, 8, 24, 8, 0, 0, TimeSpan.Zero);
         var running = await store.StartTimerAsync(project.Id, TrackingSource.Manual, started);
         await store.AddExclusionAsync(running.Id, started.AddMinutes(10), started.AddMinutes(15), "Away");
-        Assert.True(await store.RecordSoftwareUsageAsync(running.Id, software.ProcessName));
+        Assert.True(await store.TransitionSoftwareUsageAsync(running.Id, software.ProcessName, started.AddMinutes(5)));
         var beforeCheckpoint = (await store.GetTimeEntryAsync(running.Id))!;
         await store.CheckpointRunningTimerAsync(started.AddMinutes(30));
         var afterCheckpoint = (await store.GetTimeEntryAsync(running.Id))!;
@@ -3503,6 +3603,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         var whileRunning = await store.CaptureProfileSyncChangesAsync(deviceId, "Laptop", seedAll: true);
         Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeEntries" && change.EntityId == running.Id.ToString("D"));
         Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeEntrySoftware");
+        Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeEntrySoftwareIntervals");
         Assert.DoesNotContain(whileRunning, change => change.EntityType == "TimeExclusions");
         await store.AcknowledgeProfileSyncChangesAsync(whileRunning.Select(change => change.RevisionId).ToArray());
 
@@ -3518,8 +3619,12 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
                 software.Id.ToString("D"),
                 Assert.Single(payload.RootElement.GetProperty("__SoftwareIds").EnumerateArray()).GetString(),
                 ignoreCase: true);
+            var interval = Assert.Single(payload.RootElement.GetProperty("__SoftwareIntervals").EnumerateArray());
+            Assert.Equal(started.AddMinutes(5), DateTimeOffset.Parse(interval.GetProperty("StartUtc").GetString()!, CultureInfo.InvariantCulture));
+            Assert.Equal(started.AddHours(1), DateTimeOffset.Parse(interval.GetProperty("EndUtc").GetString()!, CultureInfo.InvariantCulture));
         }
         Assert.Contains(completed, change => change.EntityType == "TimeEntrySoftware");
+        Assert.Contains(completed, change => change.EntityType == "TimeEntrySoftwareIntervals");
         Assert.Contains(completed, change => change.EntityType == "TimeExclusions");
     }
 
@@ -3560,7 +3665,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'ProfileSync%';";
         Assert.Equal(7L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         verifyCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(27L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Equal(28L, (long)(await verifyCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -3819,7 +3924,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await versionConnection.OpenAsync();
         await using var versionCommand = versionConnection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(27L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(28L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     private static TrelloCard CreateTrelloCard(

@@ -571,6 +571,12 @@ public sealed record ReportRow(
     long DurationWithShortIdleSeconds = 0,
     long CallDurationSeconds = 0);
 
+public sealed record SoftwareUsageSummary(
+    Guid SoftwareId,
+    string Label,
+    string ProcessName,
+    long DurationSeconds);
+
 public static class ShortIdleReportingSettings
 {
     public const string MaximumMinutesKey = "reports.short-idle.maximum-minutes";

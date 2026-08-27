@@ -7,7 +7,7 @@
 - Current source version: **1.142.4**.
 - Platform: Windows x64, WPF, .NET 10 (`net10.0-windows10.0.19041.0`).
 - SDK pinned by `global.json`: **10.0.301**, rolling to the latest compatible feature band.
-- Persistence: per-profile SQLite, current schema **27**.
+- Persistence: per-profile SQLite, current schema **28**.
 - Installer: self-contained single-file app plus a WiX 5 per-machine **MSI**. It is not MSIX.
 - Product name changed after the original implementation. Namespaces, project folders, the single-instance mutex, registry compatibility paths, and the `PROJECT_TIME_TRACKER_*` smoke variables intentionally retain the old `ProjectTimeTracker` name.
 
@@ -116,7 +116,7 @@ Before handing off:
 
 - Windows/WPF is the only host. Core interfaces make a later host possible, but there is no macOS implementation.
 - Profiles separate data but are not password-protected OS accounts.
-- Google Sheets requires every participating computer to run the schema-27/protocol-1 version. Legacy visible-only rows are archived and offered as explicit Import/Ignore candidates.
+- Google Sheets requires every participating computer to run the schema-28/protocol-2 version. Legacy visible-only rows are archived and offered as explicit Import/Ignore candidates.
 - Deletion revisions are durable. Project/client removal produces dependent deletion records; a concurrent parent-delete/offline-work case remains grouped for explicit destructive review.
 - Daily database snapshots exist, but there is no in-app restore UI.
 - The UI smoke suite is embedded in `App.xaml.cs`/`MainWindow.xaml.cs`, not a separate UI-test project.

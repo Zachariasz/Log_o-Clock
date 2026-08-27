@@ -318,6 +318,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task UpdateEntryDetailsAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task UpdateEntryAssignmentAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<bool> RecordSoftwareUsageAsync(Guid entryId, string processName, CancellationToken cancellationToken = default);
+    Task<bool> TransitionSoftwareUsageAsync(Guid entryId, string? processName, DateTimeOffset observedUtc, CancellationToken cancellationToken = default);
     Task AddManualEntryAsync(Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, bool isCall = false, CancellationToken cancellationToken = default);
     Task UpdateTimeEntryAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, DateTimeOffset startUtc, DateTimeOffset endUtc, bool isPaid = false, long excludedSeconds = 0, CancellationToken cancellationToken = default, bool? isCall = null);
     Task SetEntriesPaidAsync(IReadOnlyCollection<Guid> entryIds, bool isPaid, CancellationToken cancellationToken = default);
@@ -330,6 +331,7 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<IReadOnlyList<TimeEntryView>> GetPendingEntriesAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReportRow>> GetReportAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, string? tag = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ReportRow>> GetReportAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, ReportFilter filter, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SoftwareUsageSummary>> GetSoftwareUsageReportAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, ReportFilter filter, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Guid>> GetGoogleSheetsEntryDeletionIdsAsync(CancellationToken cancellationToken = default);
     Task CompleteGoogleSheetsEntryDeletionsAsync(IReadOnlyCollection<Guid> entryIds, CancellationToken cancellationToken = default);
     Task<bool> HasUserProfileDataAsync(CancellationToken cancellationToken = default);
