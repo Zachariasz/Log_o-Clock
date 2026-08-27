@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private const string HistoryViewSettingKey = "history.view.columns.v1";
     private const string HistoryColumnsSubmenuTag = "HistoryColumnsSubmenu";
     private const string ReportViewSettingKey = "reports.view.columns.v1";
+    private bool _ruleGridDefaultColumnsApplied;
     private const string ReportColumnsSubmenuTag = "ReportColumnsSubmenu";
     private const double SidebarNavigationReservedHeight = 160d;
     private static readonly ReportColumnDefinition[] ReportColumnDefinitions =
@@ -438,6 +439,8 @@ public partial class MainWindow : Window
             ?? throw new InvalidOperationException("The first selection smoke project is missing.");
         var secondProject = projects.SingleOrDefault(project => project.ProjectId == secondProjectId)
             ?? throw new InvalidOperationException("The second selection smoke project is missing.");
+        ExpandReportProjectTasksForPreview(firstProjectId);
+        ExpandReportProjectTasksForPreview(secondProjectId);
         var taskGrids = FindVisualDescendants<DataGrid>(ReportGrid).ToArray();
         var firstTaskGrid = taskGrids.SingleOrDefault(grid =>
             (grid.DataContext as ProjectReportSummaryRow)?.ProjectId == firstProjectId)
@@ -469,6 +472,94 @@ public partial class MainWindow : Window
         ReportGrid.SelectedItem = secondProject;
         AssertSingleReportObjectSelection(secondProject, taskGrids, "returning to a project selection");
         ReportGrid.UnselectAll();
+    }
+
+    private void VerifyReportTaskGroupsForPreview()
+    {
+        ReportGrid.UpdateLayout();
+        var projects = (ReportGrid.ItemsSource as IEnumerable<ProjectReportSummaryRow>)?.ToArray()
+            ?? throw new InvalidOperationException("The report has no project groups to verify.");
+        var expanders = FindVisualDescendants<Expander>(ReportGrid)
+            .Where(expander => expander.DataContext is ProjectReportSummaryRow)
+            .ToArray();
+        if (expanders.Length != projects.Length || expanders.Any(expander => expander.IsExpanded))
+        {
+            throw new InvalidOperationException(
+                "Reports project task groups must start collapsed after a refresh.");
+        }
+
+        var project = projects[0];
+        var expander = expanders.Single(candidate =>
+            (candidate.DataContext as ProjectReportSummaryRow)?.ProjectId == project.ProjectId);
+        var footer = FindVisualDescendants<Grid>(ReportGrid).SingleOrDefault(grid =>
+            string.Equals(grid.Tag as string, "ReportSummaryFooter", StringComparison.Ordinal) &&
+            ReferenceEquals(grid.DataContext, project));
+        var header = FindVisualDescendants<Grid>(ReportGrid).SingleOrDefault(grid =>
+            string.Equals(grid.Tag as string, "ReportSummaryHeader", StringComparison.Ordinal) &&
+            ReferenceEquals(grid.DataContext, project));
+        if (header is null || footer is null || !header.IsVisible || !footer.IsVisible ||
+            header.Children.OfType<TextBlock>().Select(textBlock => textBlock.Text).SequenceEqual(
+                ["Task", "Time", "Time + idle", "Calls", "Value", "Logs"]) == false)
+        {
+            throw new InvalidOperationException(
+                "A collapsed Reports project group must retain visible metric names and its total.");
+        }
+
+        var toggle = expander.Template.FindName("HeaderToggle", expander) as ToggleButton;
+        if (toggle is null || toggle.IsChecked != false)
+        {
+            throw new InvalidOperationException(
+                "The collapsed Reports project group is missing its task-details chevron.");
+        }
+
+        toggle.IsChecked = true;
+        ReportGrid.UpdateLayout();
+        var taskGrid = FindVisualDescendants<DataGrid>(expander).SingleOrDefault(grid =>
+            ReferenceEquals(grid.DataContext, project));
+        if (!expander.IsExpanded || taskGrid is null || !taskGrid.IsVisible)
+        {
+            throw new InvalidOperationException(
+                "Expanding a Reports project group did not reveal its task table.");
+        }
+
+        toggle.IsChecked = false;
+        ReportGrid.UpdateLayout();
+        if (expander.IsExpanded || taskGrid.IsVisible || !header.IsVisible || !footer.IsVisible)
+        {
+            throw new InvalidOperationException(
+                "Collapsing a Reports project group did not hide only its task table.");
+        }
+    }
+
+    private void ExpandReportProjectTasksForPreview(Guid projectId)
+    {
+        var expander = FindVisualDescendants<Expander>(ReportGrid).SingleOrDefault(candidate =>
+            (candidate.DataContext as ProjectReportSummaryRow)?.ProjectId == projectId)
+            ?? throw new InvalidOperationException("The report project task group is missing.");
+        expander.IsExpanded = true;
+        ReportGrid.UpdateLayout();
+    }
+
+    private void ExpandAllReportProjectTasksForPreview()
+    {
+        foreach (var expander in FindVisualDescendants<Expander>(ReportGrid)
+                     .Where(candidate => candidate.DataContext is ProjectReportSummaryRow))
+        {
+            expander.IsExpanded = true;
+        }
+
+        ReportGrid.UpdateLayout();
+    }
+
+    private void CollapseAllReportProjectTasksForPreview()
+    {
+        foreach (var expander in FindVisualDescendants<Expander>(ReportGrid)
+                     .Where(candidate => candidate.DataContext is ProjectReportSummaryRow))
+        {
+            expander.IsExpanded = false;
+        }
+
+        ReportGrid.UpdateLayout();
     }
 
     private void AssertSingleReportObjectSelection(
@@ -1132,6 +1223,14 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Window rules are not grouped by project.");
         }
 
+        if (RulesGrid.Columns.Count != 2 ||
+            Math.Abs(RulesGrid.Columns[0].MinWidth - 360d) > 0.01 ||
+            RulesGrid.Columns[1].MinWidth > 0.01)
+        {
+            throw new InvalidOperationException(
+                "Window Rules must use equal flexible widths without forcing Application beyond the viewport.");
+        }
+
         if (TagsGrid.ContextMenu?.Items.OfType<MenuItem>()
                 .All(item => !string.Equals(item.Header as string, "Remove", StringComparison.Ordinal)) != false)
         {
@@ -1772,21 +1871,20 @@ public partial class MainWindow : Window
         }
 
         ReportGrid.UpdateLayout();
+        VerifyReportTaskGroupsForPreview();
+        ExpandAllReportProjectTasksForPreview();
         var taskGrids = FindVisualDescendants<DataGrid>(ReportGrid).ToArray();
-        var footers = FindVisualDescendants<Grid>(ReportGrid)
-            .Where(grid => string.Equals(
-                grid.Tag as string,
-                "ReportSummaryFooter",
-                StringComparison.Ordinal))
+        var summaryGrids = FindVisualDescendants<Grid>(ReportGrid)
+            .Where(IsReportSummaryGrid)
             .ToArray();
         var columnsSubmenu = GetReportColumnsSubmenu();
         var headerMenu = taskGrids.FirstOrDefault()?
             .FindResource("ReportColumnHeaderMenu") as ContextMenu;
         if (taskGrids.Length == 0 ||
-            footers.Length == 0 ||
+            summaryGrids.Length == 0 ||
             taskGrids.Any(grid => grid.Columns.All(column =>
                 !string.Equals(column.Header as string, "Calls", StringComparison.Ordinal))) ||
-            footers.Any(footer => footer.ColumnDefinitions.Count != ReportColumnDefinitions.Length) ||
+            summaryGrids.Any(grid => grid.ColumnDefinitions.Count != ReportColumnDefinitions.Length) ||
             ReportColumnsButton.Content is not System.Windows.Shapes.Path ||
             ReportColumnsButton.ContextMenu?.Items.Count != 3 ||
             columnsSubmenu?.Items.Count != ReportColumnDefinitions.Length ||
@@ -1809,8 +1907,8 @@ public partial class MainWindow : Window
                 Visibility.Collapsed) ||
             taskGrids.Any(grid => Math.Abs(grid.Columns.Single(column =>
                     string.Equals(column.Header as string, "Time", StringComparison.Ordinal)).Width.Value - 137) > 0.01) ||
-            footers.Any(footer => footer.ColumnDefinitions[4].Width.Value != 0) ||
-            footers.Any(footer => Math.Abs(footer.ColumnDefinitions[1].Width.Value - 137) > 0.01) ||
+            summaryGrids.Any(grid => grid.ColumnDefinitions[4].Width.Value != 0) ||
+            summaryGrids.Any(grid => Math.Abs(grid.ColumnDefinitions[1].Width.Value - 137) > 0.01) ||
             ReportSaveViewButton.Visibility != Visibility.Visible)
         {
             throw new InvalidOperationException(
@@ -1830,8 +1928,8 @@ public partial class MainWindow : Window
                     column.Visibility != Visibility.Visible)) ||
             taskGrids.Any(grid => Math.Abs(grid.Columns.Single(column =>
                     string.Equals(column.Header as string, "Time", StringComparison.Ordinal)).Width.Value - 82) > 0.01) ||
-            footers.Any(footer => footer.ColumnDefinitions.Any(column => column.Width.Value <= 0)) ||
-            footers.Any(footer => Math.Abs(footer.ColumnDefinitions[1].Width.Value - 82) > 0.01) ||
+            summaryGrids.Any(grid => grid.ColumnDefinitions.Any(column => column.Width.Value <= 0)) ||
+            summaryGrids.Any(grid => Math.Abs(grid.ColumnDefinitions[1].Width.Value - 82) > 0.01) ||
             ReportSaveViewButton.Visibility != Visibility.Visible)
         {
             throw new InvalidOperationException(
@@ -1844,7 +1942,7 @@ public partial class MainWindow : Window
                 Visibility.Collapsed) ||
             taskGrids.Any(grid => Math.Abs(grid.Columns.Single(column =>
                     string.Equals(column.Header as string, "Time", StringComparison.Ordinal)).Width.Value - 137) > 0.01) ||
-            footers.Any(footer => Math.Abs(footer.ColumnDefinitions[1].Width.Value - 137) > 0.01) ||
+            summaryGrids.Any(grid => Math.Abs(grid.ColumnDefinitions[1].Width.Value - 137) > 0.01) ||
             ReportSaveViewButton.Visibility != Visibility.Collapsed)
         {
             throw new InvalidOperationException("The saved Reports column view and widths were not restored.");
@@ -1852,6 +1950,7 @@ public partial class MainWindow : Window
 
         _ = TrySetReportView(CreateDefaultReportView());
         await SaveReportViewAsync();
+        CollapseAllReportProjectTasksForPreview();
     }
 
     internal void VerifyHistoryOverlapForPreview(
@@ -1968,6 +2067,15 @@ public partial class MainWindow : Window
         }
 
         VerifyVisibleRuleGroups();
+        ApplyRuleGridDefaultColumnWidths(RulesGrid);
+        RulesGrid.UpdateLayout();
+        if (RulesGrid.Columns.Count != 2 ||
+            Math.Abs(RulesGrid.Columns[0].ActualWidth - RulesGrid.Columns[1].ActualWidth) > 1d)
+        {
+            throw new InvalidOperationException(
+                "The Window Rules columns do not share the available width equally.");
+        }
+
         var option = RuleProjectCombo.Items
             .OfType<ProjectFilterOption>()
             .FirstOrDefault(item => item.ProjectId == projectId)
@@ -4044,15 +4152,16 @@ public partial class MainWindow : Window
             ApplyReportColumnView(grid);
         }
 
-        foreach (var footer in FindVisualDescendants<Grid>(ReportGrid)
-                     .Where(grid => string.Equals(
-                         grid.Tag as string,
-                         "ReportSummaryFooter",
-                         StringComparison.Ordinal)))
+        foreach (var summaryGrid in FindVisualDescendants<Grid>(ReportGrid)
+                     .Where(IsReportSummaryGrid))
         {
-            ApplyReportFooterVisibility(footer);
+            ApplyReportSummaryGridColumnView(summaryGrid);
         }
     }
+
+    private static bool IsReportSummaryGrid(Grid grid) =>
+        string.Equals(grid.Tag as string, "ReportSummaryHeader", StringComparison.Ordinal) ||
+        string.Equals(grid.Tag as string, "ReportSummaryFooter", StringComparison.Ordinal);
 
     private void ApplyReportColumnView(DataGrid grid)
     {
@@ -4067,9 +4176,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ApplyReportFooterVisibility(Grid footer)
+    private void ApplyReportSummaryGridColumnView(Grid summaryGrid)
     {
-        if (footer.ColumnDefinitions.Count != ReportColumnDefinitions.Length)
+        if (summaryGrid.ColumnDefinitions.Count != ReportColumnDefinitions.Length)
         {
             return;
         }
@@ -4081,10 +4190,10 @@ public partial class MainWindow : Window
             var state = columnsByKey.GetValueOrDefault(
                 definition.Key,
                 new ReportColumnState(definition.Key, IsVisible: true, definition.Width));
-            footer.ColumnDefinitions[index].Width = state.IsVisible
+            summaryGrid.ColumnDefinitions[index].Width = state.IsVisible
                 ? new GridLength(state.Width)
                 : new GridLength(0);
-            foreach (var child in footer.Children.Cast<UIElement>()
+            foreach (var child in summaryGrid.Children.Cast<UIElement>()
                          .Where(child => Grid.GetColumn(child) == index))
             {
                 child.Visibility = state.IsVisible ? Visibility.Visible : Visibility.Collapsed;
@@ -4248,9 +4357,9 @@ public partial class MainWindow : Window
     private void ReportSummaryGrid_Loaded(object sender, RoutedEventArgs e)
     {
         _ = e;
-        if (sender is Grid footer)
+        if (sender is Grid summaryGrid)
         {
-            ApplyReportFooterVisibility(footer);
+            ApplyReportSummaryGridColumnView(summaryGrid);
         }
     }
 
@@ -4280,7 +4389,13 @@ public partial class MainWindow : Window
     private void ReportHideColumn_Click(object sender, RoutedEventArgs e)
     {
         _ = e;
-        if (sender is MenuItem { DataContext: DataGridColumn { Header: string key } })
+        var key = sender switch
+        {
+            MenuItem { DataContext: DataGridColumn { Header: string columnKey } } => columnKey,
+            MenuItem { DataContext: FrameworkElement { Tag: string headerKey } } => headerKey,
+            _ => null,
+        };
+        if (key is not null)
         {
             SetReportColumnVisibility(key, isVisible: false);
         }
@@ -7410,6 +7525,39 @@ public partial class MainWindow : Window
                 await ShowRuleDialogAsync(row);
             }
         }
+    }
+
+    private void RulesGrid_Loaded(object sender, RoutedEventArgs e)
+    {
+        _ = e;
+        if (sender is DataGrid grid)
+        {
+            ApplyRuleGridDefaultColumnWidths(grid);
+        }
+    }
+
+    private void RulesGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        _ = e;
+        if (sender is DataGrid grid)
+        {
+            ApplyRuleGridDefaultColumnWidths(grid);
+        }
+    }
+
+    private void ApplyRuleGridDefaultColumnWidths(DataGrid grid)
+    {
+        if (_ruleGridDefaultColumnsApplied || grid.Columns.Count != 2 || grid.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        _ruleGridDefaultColumnsApplied = true;
+        var availableWidth = Math.Max(0, grid.ActualWidth - SystemParameters.VerticalScrollBarWidth);
+        var titleWidth = Math.Max(360d, Math.Floor(availableWidth / 2));
+        var applicationWidth = Math.Max(0, availableWidth - titleWidth);
+        grid.Columns[0].Width = new DataGridLength(titleWidth, DataGridLengthUnitType.Pixel);
+        grid.Columns[1].Width = new DataGridLength(applicationWidth, DataGridLengthUnitType.Pixel);
     }
 
     private async Task ShowRuleDialogAsync(RuleRow? existing)

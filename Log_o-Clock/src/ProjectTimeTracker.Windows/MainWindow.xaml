@@ -1469,6 +1469,8 @@
                                 </StackPanel>
                             </Border>
                             <DataGrid x:Name="RulesGrid" Grid.Row="1" PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                      Loaded="RulesGrid_Loaded"
+                                      SizeChanged="RulesGrid_SizeChanged"
                                       MouseDoubleClick="RulesGrid_MouseDoubleClick"
                                       ContextMenuOpening="RulesGrid_ContextMenuOpening"
                                       SelectionMode="Extended">
@@ -1484,11 +1486,16 @@
                                     <GroupStyle>
                                         <GroupStyle.ContainerStyle>
                                             <Style TargetType="{x:Type GroupItem}">
+                                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                                                 <Setter Property="Template">
                                                     <Setter.Value>
                                                         <ControlTemplate TargetType="{x:Type GroupItem}">
-                                                            <StackPanel>
-                                                                <Border Background="{StaticResource SurfaceEditorBrush}"
+                                                            <Grid MinWidth="{Binding RelativeSource={RelativeSource AncestorType={x:Type DataGrid}}, Path=ActualWidth}">
+                                                                <Grid.RowDefinitions>
+                                                                    <RowDefinition Height="Auto" />
+                                                                    <RowDefinition Height="Auto" />
+                                                                </Grid.RowDefinitions>
+                                                                <Border Grid.Row="0" Background="{StaticResource SurfaceEditorBrush}"
                                                                         BorderBrush="{StaticResource BorderLightBrush}"
                                                                         BorderThickness="0,1,0,1"
                                                                         Padding="8,6" Margin="0,8,0,0">
@@ -1496,8 +1503,8 @@
                                                                                FontWeight="SemiBold"
                                                                                VerticalAlignment="Center" />
                                                                 </Border>
-                                                                <ItemsPresenter />
-                                                            </StackPanel>
+                                                                <ItemsPresenter Grid.Row="1" />
+                                                            </Grid>
                                                         </ControlTemplate>
                                                     </Setter.Value>
                                                 </Setter>
@@ -1507,7 +1514,7 @@
                                 </DataGrid.GroupStyle>
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Title contains" Binding="{Binding TitlePattern}" Width="*" MinWidth="360" ElementStyle="{StaticResource DataGridCellTextStyle}" />
-                                    <DataGridTextColumn Header="Application" Binding="{Binding Process}" Width="220" ElementStyle="{StaticResource DataGridCellTextStyle}" />
+                                    <DataGridTextColumn Header="Application" Binding="{Binding Process}" Width="*" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
                             <Expander x:Name="FreezedRulesExpander" Grid.Row="2" Header="Freezed Projects"
@@ -1913,28 +1920,127 @@
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
-                                        <Border Padding="8,10,8,8">
-                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Project}" Foreground="{StaticResource InkBrush}"
-                                                           FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
-                                                           TextTrimming="CharacterEllipsis" />
-                                                <Ellipse Width="5" Height="5" Margin="9,1,9,0" VerticalAlignment="Center"
-                                                         Fill="{StaticResource ProjectClientDotBrush}" />
-                                                <TextBlock Text="{Binding Client}" Foreground="{StaticResource ProjectClientTextBrush}"
-                                                           FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                            </StackPanel>
-                                        </Border>
-                                        <DataGrid Grid.Row="1" ItemsSource="{Binding Tasks}" Margin="24,0,0,0"
-                                                  RowHeight="31" ColumnHeaderHeight="31"
-                                                  SelectionMode="Single" SelectionUnit="FullRow"
-                                                  Loaded="ReportTaskGrid_Loaded"
-                                                  PreviewMouseLeftButtonUp="ReportTaskGrid_PreviewMouseLeftButtonUp"
-                                                  PreviewMouseRightButtonDown="SelectRowOnRightClick"
-                                                  SelectionChanged="ReportTaskGrid_SelectionChanged"
-                                                  MouseDoubleClick="ReportTaskGrid_MouseDoubleClick"
-                                                  ContextMenuOpening="ReportTaskGrid_ContextMenuOpening"
-                                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
-                                                  ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                                        <Expander Grid.Row="0" Grid.RowSpan="2" IsExpanded="False"
+                                                  HorizontalContentAlignment="Stretch"
+                                                  Foreground="{StaticResource InkBrush}">
+                                            <Expander.Template>
+                                                <ControlTemplate TargetType="Expander">
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <ToggleButton x:Name="HeaderToggle" Width="32" Height="32"
+                                                                      Margin="8,6,0,0" HorizontalAlignment="Left"
+                                                                      VerticalAlignment="Top" Focusable="False"
+                                                                      ToolTip="Show tasks"
+                                                                      AutomationProperties.Name="Show project tasks"
+                                                                      IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}">
+                                                            <ToggleButton.Template>
+                                                                <ControlTemplate TargetType="ToggleButton">
+                                                                    <Border Background="Transparent">
+                                                                        <Path x:Name="Chevron" Data="M 1 0 L 6 5 L 1 10"
+                                                                              Stroke="{StaticResource MutedBrush}" StrokeThickness="1.7"
+                                                                              StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                                              Width="7" Height="11" HorizontalAlignment="Center"
+                                                                              VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <ControlTemplate.Triggers>
+                                                                        <Trigger Property="IsChecked" Value="True">
+                                                                            <Setter TargetName="Chevron" Property="Data" Value="M 0 1 L 5 6 L 10 1" />
+                                                                            <Setter TargetName="Chevron" Property="Width" Value="11" />
+                                                                            <Setter TargetName="Chevron" Property="Height" Value="7" />
+                                                                        </Trigger>
+                                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                                            <Setter TargetName="Chevron" Property="Stroke" Value="{StaticResource InkBrush}" />
+                                                                        </Trigger>
+                                                                    </ControlTemplate.Triggers>
+                                                                </ControlTemplate>
+                                                            </ToggleButton.Template>
+                                                        </ToggleButton>
+                                                        <ContentPresenter Grid.Row="0" ContentSource="Header"
+                                                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                                        <ContentPresenter x:Name="ExpandedContent" Grid.Row="1"
+                                                                          ContentSource="Content" Visibility="Collapsed" />
+                                                    </Grid>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsExpanded" Value="True">
+                                                            <Setter TargetName="ExpandedContent" Property="Visibility" Value="Visible" />
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Expander.Template>
+                                            <Expander.Header>
+                                                <Grid>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <Border Margin="40,0,0,0" Padding="8,10,8,8">
+                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Project}" Foreground="{StaticResource InkBrush}"
+                                                                       FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                                       TextTrimming="CharacterEllipsis" />
+                                                            <Ellipse Width="5" Height="5" Margin="9,1,9,0" VerticalAlignment="Center"
+                                                                     Fill="{StaticResource ProjectClientDotBrush}" />
+                                                            <TextBlock Text="{Binding Client}" Foreground="{StaticResource ProjectClientTextBrush}"
+                                                                       FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                    <Border Grid.Row="1" Margin="24,0,0,0"
+                                                            BorderBrush="{StaticResource BorderLightBrush}"
+                                                            BorderThickness="0,0,0,1">
+                                                        <Grid MinHeight="31" Tag="ReportSummaryHeader"
+                                                              Loaded="ReportSummaryGrid_Loaded">
+                                                            <Grid.Resources>
+                                                                <ContextMenu x:Key="ReportSummaryColumnHeaderMenu" x:Shared="False"
+                                                                             DataContext="{Binding PlacementTarget, RelativeSource={RelativeSource Self}}">
+                                                                    <MenuItem Header="Hide column" Click="ReportHideColumn_Click" />
+                                                                </ContextMenu>
+                                                                <Style x:Key="ReportSummaryColumnHeaderStyle" TargetType="TextBlock">
+                                                                    <Setter Property="Margin" Value="8,0" />
+                                                                    <Setter Property="Foreground" Value="{StaticResource ContentSecondaryBrush}" />
+                                                                    <Setter Property="FontSize" Value="11" />
+                                                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                                                    <Setter Property="ContextMenu" Value="{StaticResource ReportSummaryColumnHeaderMenu}" />
+                                                                </Style>
+                                                            </Grid.Resources>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="220" />
+                                                                <ColumnDefinition Width="82" />
+                                                                <ColumnDefinition Width="96" />
+                                                                <ColumnDefinition Width="82" />
+                                                                <ColumnDefinition Width="112" />
+                                                                <ColumnDefinition Width="72" />
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Grid.Column="0" Text="Task" Tag="Task"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                            <TextBlock Grid.Column="1" Text="Time" Tag="Time"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                            <TextBlock Grid.Column="2" Text="Time + idle" Tag="Time + idle"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                            <TextBlock Grid.Column="3" Text="Calls" Tag="Calls"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                            <TextBlock Grid.Column="4" Text="Value" Tag="Value"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                            <TextBlock Grid.Column="5" Text="Logs" Tag="Logs"
+                                                                       Style="{StaticResource ReportSummaryColumnHeaderStyle}" />
+                                                        </Grid>
+                                                    </Border>
+                                                </Grid>
+                                            </Expander.Header>
+                                            <DataGrid ItemsSource="{Binding Tasks}" Margin="24,0,0,0"
+                                                      RowHeight="31" ColumnHeaderHeight="0"
+                                                      SelectionMode="Single" SelectionUnit="FullRow"
+                                                      Loaded="ReportTaskGrid_Loaded"
+                                                      PreviewMouseLeftButtonUp="ReportTaskGrid_PreviewMouseLeftButtonUp"
+                                                      PreviewMouseRightButtonDown="SelectRowOnRightClick"
+                                                      SelectionChanged="ReportTaskGrid_SelectionChanged"
+                                                      MouseDoubleClick="ReportTaskGrid_MouseDoubleClick"
+                                                      ContextMenuOpening="ReportTaskGrid_ContextMenuOpening"
+                                                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                                      ScrollViewer.VerticalScrollBarVisibility="Disabled">
                                             <DataGrid.Resources>
                                                 <ContextMenu x:Key="ReportColumnHeaderMenu" x:Shared="False"
                                                              DataContext="{Binding PlacementTarget.Column, RelativeSource={RelativeSource Self}}">
@@ -1964,7 +2070,8 @@
                                                 <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="112" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                                 <DataGridTextColumn Header="Logs" Binding="{Binding Entries}" Width="72" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                             </DataGrid.Columns>
-                                        </DataGrid>
+                                            </DataGrid>
+                                        </Expander>
                                         <Border Grid.Row="2" Margin="24,0,0,0"
                                                 BorderBrush="{StaticResource StrongBorderBrush}"
                                                 BorderThickness="0,2,0,0" Padding="0,8,0,0">
