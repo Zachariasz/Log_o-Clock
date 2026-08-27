@@ -1914,7 +1914,9 @@
                             </ListBox.ItemContainerStyle>
                             <ListBox.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Margin="8,0,8,16">
+                                    <Border Margin="8,0,8,10" Padding="0,0,0,6"
+                                            BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="0,0,0,1">
+                                    <Grid>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
@@ -2104,6 +2106,7 @@
                                             </Grid>
                                         </Border>
                                     </Grid>
+                                    </Border>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>
                         </ListBox>

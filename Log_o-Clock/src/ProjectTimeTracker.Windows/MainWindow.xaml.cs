@@ -472,6 +472,7 @@ public partial class MainWindow : Window
         ReportGrid.SelectedItem = secondProject;
         AssertSingleReportObjectSelection(secondProject, taskGrids, "returning to a project selection");
         ReportGrid.UnselectAll();
+        CollapseAllReportProjectTasksForPreview();
     }
 
     private void VerifyReportTaskGroupsForPreview()
