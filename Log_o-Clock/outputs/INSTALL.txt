@@ -1,16 +1,16 @@
-LOG O'CLOCK 1.142.4
+LOG O'CLOCK 1.144.2
 Created by Zachariasz Jędrzejczyk
 
 Recommended installation
 ------------------------
 Exit any currently running Project Time Tracker or Log O'clock tray app, then run
-installer\LogOClock-Setup-1.142.4.msi and approve the Windows
+installer\LogOClock-Setup-1.144.2.msi and approve the Windows
 administrator prompt. The installer adds Log O'clock to Program Files
 and creates a Start menu shortcut.
 
 Portable launch
 ---------------
-LogOClock-1.142.4-win-x64\LogOClock.exe is the same self-contained
+LogOClock-1.144.2-win-x64\LogOClock.exe is the same self-contained
 application without the installer. It does not require a separate .NET runtime.
 
 Two-way whole-profile Google Sheets synchronization

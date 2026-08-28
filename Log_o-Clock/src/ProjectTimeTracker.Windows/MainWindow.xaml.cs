@@ -2322,10 +2322,14 @@ public partial class MainWindow : Window
 
         if (AutomationNeedsAttentionPanel.Visibility != Visibility.Visible ||
             AutomationFrozenSoftwareList.Items.Count == 0 ||
-            AutomationFrozenRulesList.Items.Count == 0)
+            AutomationFrozenRulesList.Items.Count == 0 ||
+            !ReferenceEquals(AutomationFrozenSoftwareExpander.Style, FindResource("FrozenProjectSectionStyle")) ||
+            !ReferenceEquals(AutomationFrozenRulesExpander.Style, FindResource("FrozenProjectSectionStyle")) ||
+            !ReferenceEquals(AutomationFrozenSoftwareList.Style, FindResource("FrozenProjectListStyle")) ||
+            !ReferenceEquals(AutomationFrozenRulesList.Style, FindResource("FrozenProjectListStyle")))
         {
             throw new InvalidOperationException(
-                "Automation is missing Needs attention or its collapsed frozen/history sections.");
+                "Automation is missing Needs attention or its shared frozen/history visual treatment.");
         }
 
         ShowAutomationLearningNotice(new AutomationLearningNotice(
@@ -4662,6 +4666,8 @@ public partial class MainWindow : Window
             return;
         }
 
+        CollapseFrozenProjectSections();
+
         if (MainTabs.SelectedIndex != 0 && _historySortMemberPath is not null)
         {
             ClearHistorySort();
@@ -4698,6 +4704,8 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        CollapseFrozenProjectSections();
 
         if (ManagementTabs.SelectedIndex == 2)
         {
@@ -10796,15 +10804,22 @@ public partial class MainWindow : Window
             throw new InvalidOperationException("Projects is missing its freeze context-menu actions.");
         }
 
-        if (!string.Equals(FreezedProjectsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
-            FrozenProjectsList.Opacity >= 1d ||
-            !string.Equals(FreezedTagsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
-            !string.Equals(FreezedTasksExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
-            !string.Equals(FreezedTargetsExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
-            !string.Equals(FreezedSoftwareExpander.Header as string, "Freezed Projects", StringComparison.Ordinal) ||
-            !string.Equals(FreezedRulesExpander.Header as string, "Freezed Projects", StringComparison.Ordinal))
+        var frozenSections = new[]
         {
-            throw new InvalidOperationException("Frozen project sections must be folded and visually muted.");
+            FreezedProjectsExpander, FreezedTagsExpander, FreezedTasksExpander,
+            FreezedTargetsExpander, FreezedSoftwareExpander, FreezedRulesExpander,
+        };
+        var frozenLists = new[]
+        {
+            FrozenProjectsList, FrozenTagsList, FrozenTasksList,
+            FrozenTargetsList, FrozenSoftwareList, FrozenRulesList,
+        };
+        if (frozenSections.Any(section =>
+                !string.Equals(section.Header as string, "Frozen projects", StringComparison.Ordinal) ||
+                !ReferenceEquals(section.Style?.BasedOn, FindResource("FrozenProjectSectionStyle"))) ||
+            frozenLists.Any(list => !ReferenceEquals(list.Style, FindResource("FrozenProjectListStyle"))))
+        {
+            throw new InvalidOperationException("Frozen project sections must use the shared muted visual treatment.");
         }
 
         var activeRow = new ProjectRow(
@@ -10826,6 +10841,45 @@ public partial class MainWindow : Window
         {
             throw new InvalidOperationException("A frozen project does not expose only the Unfreeze project action.");
         }
+    }
+
+    internal void VerifyFrozenTasksExpansionForPreview()
+    {
+        if (FrozenTasksList.Items.Count == 0)
+        {
+            throw new InvalidOperationException("The frozen Tasks preview needs a frozen task row.");
+        }
+
+        MainTabs.SelectedIndex = 1;
+        ManagementTabs.SelectedIndex = 3;
+        FreezedTasksExpander.IsExpanded = true;
+        UpdateLayout();
+
+        if (FrozenTasksList.ActualHeight <= 0 ||
+            FrozenTasksList.ItemContainerGenerator.ContainerFromIndex(0) is not ListBoxItem { ActualHeight: > 0 })
+        {
+            throw new InvalidOperationException("The frozen Tasks section did not render after expanding.");
+        }
+
+        ManagementTabs.SelectedIndex = 4;
+        if (FreezedTasksExpander.IsExpanded)
+        {
+            throw new InvalidOperationException("Changing management tabs did not collapse the frozen Tasks section.");
+        }
+
+        ManagementTabs.SelectedIndex = 3;
+    }
+
+    private void CollapseFrozenProjectSections()
+    {
+        FreezedProjectsExpander.IsExpanded = false;
+        FreezedTargetsExpander.IsExpanded = false;
+        FreezedTasksExpander.IsExpanded = false;
+        FreezedTagsExpander.IsExpanded = false;
+        FreezedSoftwareExpander.IsExpanded = false;
+        FreezedRulesExpander.IsExpanded = false;
+        AutomationFrozenSoftwareExpander.IsExpanded = false;
+        AutomationFrozenRulesExpander.IsExpanded = false;
     }
 
     private static void ConfigureProjectFreezeContextMenu(ContextMenu menu, ProjectRow? selectedProject)

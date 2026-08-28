@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Controls;
 using ProjectTimeTracker.Core;
 
 namespace ProjectTimeTracker.Windows.Views;
@@ -13,6 +14,17 @@ public partial class GoogleSheetsConnectionWindow : Window
         _syncService = syncService;
         InitializeComponent();
         Loaded += (_, _) => ClientIdText.Focus();
+    }
+
+    internal void VerifyConnectionModeChoicesForPreview()
+    {
+        var sharedStyle = TryFindResource(typeof(RadioButton)) as Style;
+        if (sharedStyle is null ||
+            !ReferenceEquals(CreateNewRadio.Style, sharedStyle) ||
+            !ReferenceEquals(UseExistingRadio.Style, sharedStyle))
+        {
+            throw new InvalidOperationException("Google Sheets connection choices must use the shared dark radio-button style.");
+        }
     }
 
     private void ConnectionMode_Changed(object sender, RoutedEventArgs e)

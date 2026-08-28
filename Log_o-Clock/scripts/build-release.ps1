@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string] $AppVersion = "1.142.4",
+    [string] $AppVersion = "1.144.2",
     [string] $CertificatePath,
     [string] $CertificatePassword,
     [string] $TimestampUrl = "http://timestamp.digicert.com"

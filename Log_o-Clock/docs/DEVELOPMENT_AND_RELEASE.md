@@ -75,6 +75,8 @@ Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpan
 
 `PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATION=true` seeds tracked, excluded, frozen, history-only, process-specific, and any-application examples. It verifies the shared project/search workflow, master-detail selection, Needs attention, synthetic Any application row, frozen/history sections, onboarding, memory-only title review, 30-second Edit/Undo notice, and narrow-layout horizontal access.
 
+`PROJECT_TIME_TRACKER_SMOKE_VERIFY_FROZEN_TASKS=true` seeds a frozen task, verifies that its Tasks-tab `Frozen projects` section opens and renders, then verifies that switching management tabs folds the section.
+
 `PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATIC_RECOGNITION=true` uses a fixed foreground monitor to verify silent startup, same-project software continuation, deferred atomic switching, filename task inference, delayed stopping, and the title-bar automatic-mode control without waiting for the real grace period.
 
 Feature flags follow `PROJECT_TIME_TRACKER_SMOKE_VERIFY_<AREA>`. Current source contains checks for profiles, branding, English UI, tab-filter reset, timer/tray/task search, recognition start/switch/click-away, History filters/grouping/global column sorting/continue/overlap/view, Reports charts/selection/sorting/view, targets/debt/sidebar, software, idle/session/recovery, Trello UI, and entry-editor behaviours. `PROJECT_TIME_TRACKER_SMOKE_VERIFY_HISTORY_GLOBAL_SORT=true` exercises the Client and Project header handlers across multiple days and clients, then verifies that clearing sorting restores day grouping.

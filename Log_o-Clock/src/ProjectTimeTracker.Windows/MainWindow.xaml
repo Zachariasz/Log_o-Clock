@@ -307,7 +307,7 @@
         <Style x:Key="TargetReviewChoiceStyle" TargetType="RadioButton">
             <Setter Property="Margin" Value="0,0,6,6" />
             <Setter Property="Padding" Value="10,5" />
-            <Setter Property="Foreground" Value="{StaticResource ContentSecondaryBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource ContentPrimaryBrush}" />
             <Setter Property="FontSize" Value="11" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -337,6 +337,96 @@
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="FrozenProjectListItemStyle" TargetType="ListBoxItem"
+               BasedOn="{StaticResource {x:Type ListBoxItem}}">
+            <Setter Property="Foreground" Value="{StaticResource ContentSecondaryBrush}" />
+            <Setter Property="Padding" Value="10,6" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+        <Style x:Key="FrozenProjectListStyle" TargetType="ListBox"
+               BasedOn="{StaticResource {x:Type ListBox}}">
+            <Setter Property="Foreground" Value="{StaticResource ContentSecondaryBrush}" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="ItemContainerStyle" Value="{StaticResource FrozenProjectListItemStyle}" />
+        </Style>
+        <Style x:Key="FrozenProjectSectionStyle" TargetType="Expander">
+            <Setter Property="Margin" Value="0,12,0,0" />
+            <Setter Property="IsExpanded" Value="False" />
+            <Setter Property="Foreground" Value="{StaticResource ContentPrimaryBrush}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Expander">
+                        <Grid SnapsToDevicePixels="True">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ToggleButton x:Name="HeaderToggle" Content="{TemplateBinding Header}"
+                                          IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                                          Foreground="{TemplateBinding Foreground}"
+                                          FocusVisualStyle="{x:Null}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="HeaderSurface" Background="{StaticResource SurfaceEditorBrush}"
+                                                BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                                                CornerRadius="{StaticResource Radius.Navigation}" Padding="10,8">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="20" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <Path x:Name="CollapsedChevron" Data="{StaticResource Icon.ChevronDown}" Stroke="{StaticResource IconSecondaryBrush}"
+                                                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round" Stretch="Uniform" Width="16" Height="16"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Path.RenderTransform>
+                                                        <RotateTransform Angle="-90" CenterX="8" CenterY="8" />
+                                                    </Path.RenderTransform>
+                                                </Path>
+                                                <Path x:Name="ExpandedChevron" Data="{StaticResource Icon.ChevronDown}" Stroke="{StaticResource IconSecondaryBrush}"
+                                                      StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round" Stretch="Uniform" Width="16" Height="16"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      Visibility="Collapsed" />
+                                                <ContentPresenter Grid.Column="1" Content="{TemplateBinding Content}"
+                                                                  VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="HeaderSurface" Property="Background" Value="{StaticResource StateHoverBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="HeaderSurface" Property="Background" Value="{StaticResource StateRestBrush}" />
+                                                <Setter TargetName="CollapsedChevron" Property="Visibility" Value="Collapsed" />
+                                                <Setter TargetName="ExpandedChevron" Property="Visibility" Value="Visible" />
+                                            </Trigger>
+                                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                                <Setter TargetName="HeaderSurface" Property="BorderBrush" Value="{StaticResource StrongBorderBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Border x:Name="ContentSurface" Grid.Row="1" Margin="0,4,0,0" Padding="2"
+                                    Background="{StaticResource SurfaceControlBrush}"
+                                    BorderBrush="{StaticResource BorderLightBrush}" BorderThickness="1"
+                                    CornerRadius="{StaticResource Radius.Navigation}">
+                                <ContentPresenter Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ContentTemplateSelector}" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                                <Setter TargetName="ContentSurface" Property="Visibility" Value="Collapsed" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -1094,10 +1184,9 @@
                                     <DataGridTextColumn Header="Rate" Binding="{Binding Rate}" Width="120" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedProjectsExpander" Grid.Row="1" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedProjectsExpander" Grid.Row="1" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenProjectsList, Path=HasItems}" Value="True">
@@ -1106,7 +1195,7 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenProjectsList" Height="150" Opacity="0.55"
+                                <ListBox x:Name="FrozenProjectsList" Height="150" Style="{StaticResource FrozenProjectListStyle}"
                                          PreviewMouseRightButtonDown="FrozenProjectsList_PreviewMouseRightButtonDown"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ContextMenu>
@@ -1122,9 +1211,9 @@
                                                     <ColumnDefinition Width="160" />
                                                     <ColumnDefinition Width="120" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" />
-                                                <TextBlock Grid.Column="1" Text="{Binding Client}" Foreground="{StaticResource MutedBrush}" />
-                                                <TextBlock Grid.Column="2" Text="{Binding TotalTime}" Foreground="{StaticResource MutedBrush}" />
+                                                <TextBlock Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" Foreground="{StaticResource MutedBrush}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Client, Mode=OneWay}" Foreground="{StaticResource MutedBrush}" />
+                                                <TextBlock Grid.Column="2" Text="{Binding TotalTime, Mode=OneWay}" Foreground="{StaticResource MutedBrush}" />
                                             </Grid>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -1184,10 +1273,9 @@
                                                         ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedTargetsExpander" Grid.Row="2" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedTargetsExpander" Grid.Row="2" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenTargetsList, Path=HasItems}" Value="True">
@@ -1196,16 +1284,16 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenTargetsList" Height="120" Opacity="0.55"
+                                <ListBox x:Name="FrozenTargetsList" Height="120" Style="{StaticResource FrozenProjectListStyle}"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                <Run Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Project}" />
+                                                <Run Text="{Binding Project, Mode=OneWay}" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding TargetTime}" />
+                                                <Run Text="{Binding TargetTime, Mode=OneWay}" />
                                             </TextBlock>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -1276,10 +1364,9 @@
                                     <DataGridTextColumn Header="Total time" Binding="{Binding TotalTime}" Width="130" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedTasksExpander" Grid.Row="2" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedTasksExpander" Grid.Row="2" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenTasksList, Path=HasItems}" Value="True">
@@ -1288,16 +1375,16 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenTasksList" Height="120" Opacity="0.55"
+                                <ListBox x:Name="FrozenTasksList" Height="120" Style="{StaticResource FrozenProjectListStyle}"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                <Run Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Project}" />
+                                                <Run Text="{Binding Project, Mode=OneWay}" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Client}" />
+                                                <Run Text="{Binding Client, Mode=OneWay}" />
                                             </TextBlock>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -1343,10 +1430,9 @@
                                     <DataGridTextColumn Header="Logs using tag" Binding="{Binding Usage}" Width="180" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedTagsExpander" Grid.Row="1" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedTagsExpander" Grid.Row="1" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenTagsList, Path=HasItems}" Value="True">
@@ -1355,11 +1441,11 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenTagsList" Height="120" Opacity="0.55"
+                                <ListBox x:Name="FrozenTagsList" Height="120" Style="{StaticResource FrozenProjectListStyle}"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock Margin="6,4" Text="{Binding Name}" FontWeight="SemiBold"
+                                            <TextBlock Margin="6,4" Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold"
                                                        Foreground="{StaticResource MutedBrush}" />
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -1486,27 +1572,33 @@
                                 </Grid>
                             </ScrollViewer>
                             <StackPanel Grid.Row="3">
-                                <Expander Header="Frozen-project and history-only software" Margin="0,12,0,0" IsExpanded="False">
-                                    <ListBox x:Name="AutomationFrozenSoftwareList" MaxHeight="100" Opacity="0.55"
+                                <Expander x:Name="AutomationFrozenSoftwareExpander"
+                                          Header="Frozen-project and history-only software"
+                                          Style="{StaticResource FrozenProjectSectionStyle}">
+                                    <ListBox x:Name="AutomationFrozenSoftwareList" MaxHeight="100"
+                                             Style="{StaticResource FrozenProjectListStyle}"
                                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                    <Run Text="{Binding Label}" FontWeight="SemiBold" /><Run Text="  ·  " />
-                                                    <Run Text="{Binding Process}" /><Run Text="  ·  " /><Run Text="{Binding Project}" />
+                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  ·  " />
+                                                    <Run Text="{Binding Process, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding Project, Mode=OneWay}" />
                                                 </TextBlock>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
                                     </ListBox>
                                 </Expander>
-                                <Expander Header="Frozen-project recognition rules" Margin="0,8,0,0" IsExpanded="False">
-                                    <ListBox x:Name="AutomationFrozenRulesList" MaxHeight="100" Opacity="0.55"
+                                <Expander x:Name="AutomationFrozenRulesExpander"
+                                          Header="Frozen-project recognition rules" Margin="0,8,0,0"
+                                          Style="{StaticResource FrozenProjectSectionStyle}">
+                                    <ListBox x:Name="AutomationFrozenRulesList" MaxHeight="100"
+                                             Style="{StaticResource FrozenProjectListStyle}"
                                              ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate>
                                                 <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                    <Run Text="{Binding TitlePattern}" FontWeight="SemiBold" /><Run Text="  ·  " />
-                                                    <Run Text="{Binding Process}" /><Run Text="  ·  " /><Run Text="{Binding Project}" />
+                                                    <Run Text="{Binding TitlePattern, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="  ·  " />
+                                                    <Run Text="{Binding Process, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding Project, Mode=OneWay}" />
                                                 </TextBlock>
                                             </DataTemplate>
                                         </ListBox.ItemTemplate>
@@ -1571,10 +1663,9 @@
                                                         ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedSoftwareExpander" Grid.Row="2" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedSoftwareExpander" Grid.Row="2" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenSoftwareList, Path=HasItems}" Value="True">
@@ -1583,16 +1674,16 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenSoftwareList" Height="120" Opacity="0.55"
+                                <ListBox x:Name="FrozenSoftwareList" Height="120" Style="{StaticResource FrozenProjectListStyle}"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                <Run Text="{Binding Label}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding Label, Mode=OneWay}" FontWeight="SemiBold" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Process}" />
+                                                <Run Text="{Binding Process, Mode=OneWay}" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Project}" />
+                                                <Run Text="{Binding Project, Mode=OneWay}" />
                                             </TextBlock>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>
@@ -1665,10 +1756,9 @@
                                     <DataGridTextColumn Header="Application" Binding="{Binding Process}" Width="*" ElementStyle="{StaticResource DataGridCellTextStyle}" />
                                 </DataGrid.Columns>
                             </DataGrid>
-                            <Expander x:Name="FreezedRulesExpander" Grid.Row="2" Header="Freezed Projects"
-                                      Margin="0,12,0,0" IsExpanded="False">
+                            <Expander x:Name="FreezedRulesExpander" Grid.Row="2" Header="Frozen projects">
                                 <Expander.Style>
-                                    <Style TargetType="Expander">
+                                    <Style TargetType="Expander" BasedOn="{StaticResource FrozenProjectSectionStyle}">
                                         <Setter Property="Visibility" Value="Collapsed" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding ElementName=FrozenRulesList, Path=HasItems}" Value="True">
@@ -1677,16 +1767,16 @@
                                         </Style.Triggers>
                                     </Style>
                                 </Expander.Style>
-                                <ListBox x:Name="FrozenRulesList" Height="120" Opacity="0.55"
+                                <ListBox x:Name="FrozenRulesList" Height="120" Style="{StaticResource FrozenProjectListStyle}"
                                          ScrollViewer.HorizontalScrollBarVisibility="Auto">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
                                             <TextBlock Margin="6,4" Foreground="{StaticResource MutedBrush}">
-                                                <Run Text="{Binding TitlePattern}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding TitlePattern, Mode=OneWay}" FontWeight="SemiBold" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Process}" />
+                                                <Run Text="{Binding Process, Mode=OneWay}" />
                                                 <Run Text="  •  " />
-                                                <Run Text="{Binding Project}" />
+                                                <Run Text="{Binding Project, Mode=OneWay}" />
                                             </TextBlock>
                                         </DataTemplate>
                                     </ListBox.ItemTemplate>

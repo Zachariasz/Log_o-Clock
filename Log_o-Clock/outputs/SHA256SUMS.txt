@@ -1,3 +1,2 @@
-﻿3d86a2e1e80a9e7c005e38b7296df343a3a5da3cf7f2e3c232f92fe2a9d69bc6  LogOClock-Setup-1.142.4.msi
-89ee2e0eb5fc9b80a99ea47c254aa61ca56be44e5008a37906c734f25f38c2be  LogOClock.exe
-ab359f23f4efb8f112b330d1cda114a42cae154a5b8a617bd0e553bb251c9e05  LogOClock-source-1.142.4.zip
+c89aea1c7a0bacc4cef8b70d1dce3f6f27f174e568d68a26cf8ec905353f13e6  installer/LogOClock-Setup-1.144.2.msi
+482a2c58a0d83d9482ae661cdec84ea4a28d4e50a66bd2f694eb02d6c242cb7f  LogOClock-1.144.2-win-x64/LogOClock.exe

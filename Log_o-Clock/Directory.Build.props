@@ -5,9 +5,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
-    <Version>1.142.4</Version>
-    <AssemblyVersion>1.142.4.0</AssemblyVersion>
-    <FileVersion>1.142.4.0</FileVersion>
+    <Version>1.144.2</Version>
+    <AssemblyVersion>1.144.2.0</AssemblyVersion>
+    <FileVersion>1.144.2.0</FileVersion>
     <Product>Log O'clock</Product>
     <Title>Log O'clock</Title>
     <AssemblyTitle>Log O'clock</AssemblyTitle>

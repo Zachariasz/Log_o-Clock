@@ -1420,6 +1420,24 @@ public partial class App : System.Windows.Application
                 }
 
                 if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_FROZEN_TASKS"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var client = await _store.AddClientAsync(
+                        $"Frozen Tasks smoke client {Guid.NewGuid():N}",
+                        "#687582");
+                    var project = await _store.AddProjectAsync(
+                        client.Id,
+                        "Frozen Tasks smoke project",
+                        "#339CFF");
+                    _ = await _store.AddTaskAsync(project.Id, "Frozen Tasks smoke task");
+                    await _store.SetProjectFrozenAsync(project.Id, isFrozen: true);
+                    await _mainWindow.RefreshAllAsync();
+                    _mainWindow.VerifyFrozenTasksExpansionForPreview();
+                }
+
+                if (string.Equals(
                         Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_SETTINGS_CATEGORIES"),
                         "true",
                         StringComparison.OrdinalIgnoreCase))
@@ -4722,6 +4740,7 @@ public partial class App : System.Windows.Application
                         {
                             Owner = _mainWindow,
                         };
+                        dialog.VerifyConnectionModeChoicesForPreview();
                         dialog.Show();
                         await Task.Delay(150);
                         dialog.UpdateLayout();
