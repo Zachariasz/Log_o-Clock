@@ -17,7 +17,7 @@ Log O'clock is a local-first time tracker organized as:
 
 `Client → Project → Saved task → Time entry`
 
-It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, an opt-in full automatic mode with reversible stop/switch grace boundaries, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional two-way whole-profile Google Sheets synchronization.
+It has one running timer, tray controls, manual history editing, project recognition from foreground-window titles, an opt-in full automatic mode with reversible stop/switch grace boundaries, an opt-in self-learning Automation system for configured applications and safe title rules, software-use association, idle/session review, tags, targets and target debt, paid state, rates and reports, profiles, CSV/safety archives, read-only Trello task sync, and optional two-way whole-profile Google Sheets synchronization.
 
 The detailed behaviour list is in the root [README.md](../README.md). Do not reconstruct requirements from old conversation history when the current source, tests, and README already answer the question.
 
@@ -83,7 +83,7 @@ If code writes directly through `ITrackerStore` from the UI, it usually must cal
 Some code uses numeric tab indices. Reordering tabs requires updating these consumers and smoke tests.
 
 - Main tabs: `0 History`, `1 Clients & projects`, `2 Reports`, `3 Settings`.
-- Management tabs: `0 Clients`, `1 Projects`, `2 Targets`, `3 Tasks`, `4 Tags`, `5 Software`, `6 Window rules`.
+- Management tabs: `0 Clients`, `1 Projects`, `2 Targets`, `3 Tasks`, `4 Tags`, `5 Automation`. The legacy Software and Window rules controls remain hidden compatibility hosts for existing embedded preview checks; user-facing navigation must target Automation at index 5.
 
 History and Reports intentionally reset their normal filters whenever the user re-enters the tab. Report-to-History drill-down uses a one-shot preservation flag so its intentional range and filter survive that transition.
 

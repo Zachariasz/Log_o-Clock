@@ -18,6 +18,11 @@ public partial class SoftwareSettingsWindow : Window
     private readonly Func<WindowActivity?>? _captureCurrentActivity;
     private readonly ObservableCollection<TagDefinition> _allTags;
     private readonly ObservableCollection<TagDefinition> _tags;
+    private readonly IReadOnlyList<RecognitionRule> _availableRules;
+    private readonly bool _isEditing;
+    private readonly bool _ruleOnly;
+    private string? _capturedWindowTitle;
+    private bool _initialized;
     private bool _updatingNewTagText;
 
     public SoftwareSettingsWindow(
@@ -25,18 +30,38 @@ public partial class SoftwareSettingsWindow : Window
         IReadOnlyList<TagDefinition> availableTags,
         IReadOnlyList<ProjectOption> projects,
         Guid? selectedProjectId = null,
-        Func<WindowActivity?>? captureCurrentActivity = null)
+        Func<WindowActivity?>? captureCurrentActivity = null,
+        string? titlePattern = null,
+        WindowActivity? initialActivity = null,
+        IReadOnlyList<RecognitionRule>? availableRules = null,
+        bool ruleOnly = false,
+        string? initialProcessName = null)
     {
         InitializeComponent();
         _captureCurrentActivity = captureCurrentActivity;
+        _availableRules = availableRules ?? [];
+        _ruleOnly = ruleOnly;
+        _isEditing = setting is not null || ruleOnly && titlePattern is not null;
         _allTags = new ObservableCollection<TagDefinition>(availableTags);
         _tags = [];
         var software = setting?.Software;
-        Heading = software is null ? "Add software" : "Software settings";
+        Heading = ruleOnly
+            ? "Automation settings"
+            : software is null ? "Add automation" : "Automation settings";
         Title = Heading;
         HeadingText.Text = Heading;
         LabelText.Text = software?.Label ?? string.Empty;
-        ProcessText.Text = software?.ProcessName ?? string.Empty;
+        ProcessText.Text = software?.ProcessName ?? initialProcessName ?? string.Empty;
+        TitlePatternText.Text = titlePattern ?? string.Empty;
+        if (software is null && initialActivity is not null)
+        {
+            _capturedWindowTitle = initialActivity.Title;
+            ProcessText.Text = initialActivity.ProcessName;
+            LabelText.Text = AutomationLearningPolicy.DefaultSoftwareLabel(initialActivity.ProcessName);
+            TitlePatternText.Text = initialActivity.Title;
+            CaptureStatusText.Text =
+                "Current window captured. Shorten the title to a stable identifying phrase before saving.";
+        }
         ProcessText.IsReadOnly = software is not null;
         ProcessText.Foreground = software is null
             ? (System.Windows.Media.Brush)FindResource("ContentPrimaryBrush")
@@ -44,10 +69,17 @@ public partial class SoftwareSettingsWindow : Window
         CaptureProcessButton.Visibility = software is null && captureCurrentActivity is not null
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ProjectCombo.ItemsSource = new[] { GlobalScopeOption }.Concat(projects).ToArray();
+        CaptureCurrentButton.Visibility = captureCurrentActivity is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ProjectCombo.ItemsSource = ruleOnly
+            ? projects.ToArray()
+            : new[] { GlobalScopeOption }.Concat(projects).ToArray();
         ProjectCombo.SelectedValue = setting?.ProjectId
             ?? selectedProjectId
-            ?? SystemEntityIds.GlobalSoftwareScopeId;
+            ?? (ruleOnly
+                ? projects.FirstOrDefault()?.ProjectId
+                : SystemEntityIds.GlobalSoftwareScopeId);
         ProjectCombo.IsEnabled = setting is null;
         UpdateScopeHelpText();
         ExcludedCheck.IsChecked = setting?.IsExcluded == true;
@@ -55,6 +87,21 @@ public partial class SoftwareSettingsWindow : Window
         TagsList.ItemsSource = _tags;
         var selectedIds = (setting?.Tags ?? []).Select(tag => tag.Id).ToHashSet();
         RefreshAvailableTags(selectedIds);
+        RefreshRuleEditors();
+        if (ruleOnly)
+        {
+            LabelEditorPanel.Visibility = Visibility.Collapsed;
+            Grid.SetColumn(ProcessEditorPanel, 0);
+            Grid.SetColumnSpan(ProcessEditorPanel, 3);
+            ExclusionPanel.Visibility = Visibility.Collapsed;
+            CorrelatedTagsEditorPanel.Visibility = Visibility.Collapsed;
+            CorrelatedTagsListPanel.Visibility = Visibility.Collapsed;
+            AutomationRulesAdvancedExpander.Visibility = Visibility.Collapsed;
+            TitlePatternHelpText.Text =
+                "Leave Process name blank to create an Any application rule.";
+        }
+
+        _initialized = true;
         Loaded += (_, _) => (software is null ? ProcessText : LabelText).Focus();
     }
 
@@ -63,6 +110,9 @@ public partial class SoftwareSettingsWindow : Window
     public string Label { get; private set; } = string.Empty;
     public Guid ProjectId { get; private set; }
     public bool IsExcluded { get; private set; }
+    public string? TitlePattern { get; private set; }
+    public IReadOnlyList<string> AdditionalTitlePatterns { get; private set; } = [];
+    public IReadOnlyList<string> AnyApplicationTitlePatterns { get; private set; } = [];
     public IReadOnlyList<Guid> SelectedTagIds { get; private set; } = [];
     public IReadOnlyList<string> SelectedTagNames { get; private set; } = [];
 
@@ -103,9 +153,45 @@ public partial class SoftwareSettingsWindow : Window
         CorrelatedTagsListPanel.Visibility == Visibility.Collapsed;
 
     internal bool HasThreeRowTagViewportForPreview =>
-        CorrelatedTagsListPanel.ActualHeight >= 132d &&
+        CorrelatedTagsListPanel.ActualHeight >= 112d &&
         ScrollViewer.GetHorizontalScrollBarVisibility(TagsList) == ScrollBarVisibility.Disabled &&
         ScrollViewer.GetVerticalScrollBarVisibility(TagsList) == ScrollBarVisibility.Auto;
+
+    internal void VerifyAdvancedRulesForPreview(
+        IReadOnlyCollection<string> expectedProcessPatterns,
+        IReadOnlyCollection<string> expectedAnyApplicationPatterns)
+    {
+        AutomationRulesAdvancedExpander.IsExpanded = true;
+        UpdateLayout();
+        var processPatterns = new[] { TitlePatternText.Text }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Concat(ParseTitlePatterns(AdditionalTitlePatternsText.Text))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var anyApplicationPatterns = ParseTitlePatterns(AnyApplicationTitlePatternsText.Text)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!processPatterns.SetEquals(expectedProcessPatterns) ||
+            !anyApplicationPatterns.SetEquals(expectedAnyApplicationPatterns))
+        {
+            throw new InvalidOperationException(
+                "Automation settings did not load multiple process and Any application rules into its Advanced section.");
+        }
+    }
+
+    internal void VerifyRuleOnlyModeForPreview()
+    {
+        if (!_ruleOnly ||
+            LabelEditorPanel.Visibility != Visibility.Collapsed ||
+            ExclusionPanel.Visibility != Visibility.Collapsed ||
+            CorrelatedTagsEditorPanel.Visibility != Visibility.Collapsed ||
+            CorrelatedTagsListPanel.Visibility != Visibility.Collapsed ||
+            AutomationRulesAdvancedExpander.Visibility != Visibility.Collapsed ||
+            Grid.GetColumn(ProcessEditorPanel) != 0 ||
+            Grid.GetColumnSpan(ProcessEditorPanel) != 3)
+        {
+            throw new InvalidOperationException(
+                "Advanced rule editing is not using the focused Automation settings mode.");
+        }
+    }
 
     internal void SetExcludedForPreview(bool isExcluded) =>
         ExcludedCheck.IsChecked = isExcluded;
@@ -183,13 +269,13 @@ public partial class SoftwareSettingsWindow : Window
 
     private bool TryPrepareResult()
     {
-        if (string.IsNullOrWhiteSpace(LabelText.Text))
+        if (!_ruleOnly && string.IsNullOrWhiteSpace(LabelText.Text))
         {
             ValidationText.Text = "Enter a software label.";
             return false;
         }
 
-        if (string.IsNullOrWhiteSpace(ProcessText.Text))
+        if (!_ruleOnly && string.IsNullOrWhiteSpace(ProcessText.Text))
         {
             ValidationText.Text = "Enter the process name, for example blender or blender.exe.";
             return false;
@@ -201,13 +287,34 @@ public partial class SoftwareSettingsWindow : Window
             return false;
         }
 
-        if (ExcludedCheck.IsChecked != true && !CommitPendingTagText())
+        if (_ruleOnly && string.IsNullOrWhiteSpace(TitlePatternText.Text))
+        {
+            ValidationText.Text = "Enter a title phrase for recognition.";
+            return false;
+        }
+
+        if ((!string.IsNullOrWhiteSpace(TitlePatternText.Text) ||
+             !string.IsNullOrWhiteSpace(AdditionalTitlePatternsText.Text) ||
+             !string.IsNullOrWhiteSpace(AnyApplicationTitlePatternsText.Text)) &&
+            projectId == SystemEntityIds.GlobalSoftwareScopeId)
+        {
+            ValidationText.Text =
+                "Choose a project scope before adding a title recognition phrase.";
+            return false;
+        }
+
+        if (!_ruleOnly && ExcludedCheck.IsChecked != true && !CommitPendingTagText())
         {
             return false;
         }
 
         ProcessName = ProcessText.Text.Trim();
         Label = LabelText.Text.Trim();
+        TitlePattern = string.IsNullOrWhiteSpace(TitlePatternText.Text)
+            ? null
+            : TitlePatternText.Text.Trim();
+        AdditionalTitlePatterns = ParseTitlePatterns(AdditionalTitlePatternsText.Text);
+        AnyApplicationTitlePatterns = ParseTitlePatterns(AnyApplicationTitlePatternsText.Text);
         ProjectId = projectId;
         IsExcluded = ExcludedCheck.IsChecked == true;
         SelectedTagIds = TagsList.SelectedItems
@@ -232,7 +339,69 @@ public partial class SoftwareSettingsWindow : Window
             RefreshAvailableTags(
                 TagsList.SelectedItems.OfType<TagDefinition>().Select(tag => tag.Id).ToHashSet());
         }
+
+        if (_initialized && !_ruleOnly)
+        {
+            RefreshAnyApplicationRules();
+        }
     }
+
+    private void RefreshRuleEditors()
+    {
+        if (_ruleOnly || ProjectCombo.SelectedValue is not Guid projectId)
+        {
+            return;
+        }
+
+        var processName = string.IsNullOrWhiteSpace(ProcessText.Text)
+            ? null
+            : Path.GetFileNameWithoutExtension(ProcessText.Text.Trim());
+        if (processName is not null)
+        {
+            var processRules = _availableRules
+                .Where(rule =>
+                    rule.ProjectId == projectId &&
+                    rule.ProcessName is not null &&
+                    string.Equals(
+                        rule.ProcessName,
+                        processName,
+                        StringComparison.OrdinalIgnoreCase))
+                .OrderBy(rule => rule.TitlePattern, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (processRules.Length > 0)
+            {
+                TitlePatternText.Text = processRules[0].TitlePattern;
+                AdditionalTitlePatternsText.Text = string.Join(
+                    Environment.NewLine,
+                    processRules.Skip(1).Select(rule => rule.TitlePattern));
+            }
+        }
+
+        RefreshAnyApplicationRules();
+    }
+
+    private void RefreshAnyApplicationRules()
+    {
+        if (ProjectCombo.SelectedValue is not Guid projectId)
+        {
+            AnyApplicationTitlePatternsText.Clear();
+            return;
+        }
+
+        AnyApplicationTitlePatternsText.Text = string.Join(
+            Environment.NewLine,
+            _availableRules
+                .Where(rule => rule.ProjectId == projectId && rule.ProcessName is null)
+                .OrderBy(rule => rule.TitlePattern, StringComparer.OrdinalIgnoreCase)
+                .Select(rule => rule.TitlePattern));
+    }
+
+    private static IReadOnlyList<string> ParseTitlePatterns(string value) =>
+        value.Split(
+                ["\r\n", "\n", "\r"],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     private void RefreshAvailableTags(IReadOnlySet<Guid> selectedIds)
     {
@@ -437,6 +606,13 @@ public partial class SoftwareSettingsWindow : Window
         await CaptureActiveProcessAsync(TimeSpan.FromSeconds(3), minimizeWindow: true);
     }
 
+    private async void CaptureCurrentButton_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await CaptureActiveProcessAsync(TimeSpan.Zero, minimizeWindow: false);
+    }
+
     private async Task CaptureActiveProcessAsync(TimeSpan delay, bool minimizeWindow)
     {
         if (_captureCurrentActivity is null)
@@ -445,7 +621,10 @@ public partial class SoftwareSettingsWindow : Window
         }
 
         CaptureProcessButton.IsEnabled = false;
-        CaptureStatusText.Text = "Switch to the target application now. Capturing in 3 seconds…";
+        CaptureCurrentButton.IsEnabled = false;
+        CaptureStatusText.Text = delay > TimeSpan.Zero
+            ? "Switch to the target application now. Capturing in 3 seconds…"
+            : "Capturing the current external window.";
         if (minimizeWindow)
         {
             WindowState = WindowState.Minimized;
@@ -463,21 +642,41 @@ public partial class SoftwareSettingsWindow : Window
         }
 
         CaptureProcessButton.IsEnabled = true;
+        CaptureCurrentButton.IsEnabled = true;
         if (activity is null || string.IsNullOrWhiteSpace(activity.ProcessName))
         {
             CaptureStatusText.Text = "No foreground process could be captured.";
             return;
         }
 
-        ProcessText.Text = activity.ProcessName;
+        if (!_isEditing || _ruleOnly)
+        {
+            ProcessText.Text = activity.ProcessName;
+        }
+        else if (!string.Equals(
+                     ProcessText.Text,
+                     activity.ProcessName,
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            CaptureStatusText.Text =
+                $"Captured {activity.ProcessName}, but this automation belongs to {ProcessText.Text}. Open that application before capturing a title phrase.";
+            return;
+        }
+
+        _capturedWindowTitle = activity.Title;
         if (string.IsNullOrWhiteSpace(LabelText.Text))
         {
             LabelText.Text = activity.ProcessName;
         }
 
         CaptureStatusText.Text = $"Captured {activity.ProcessName}. You can edit its display label before saving.";
-        LabelText.Focus();
-        LabelText.SelectAll();
+        if (string.IsNullOrWhiteSpace(TitlePatternText.Text) &&
+            !string.IsNullOrWhiteSpace(_capturedWindowTitle))
+        {
+            TitlePatternText.Text = _capturedWindowTitle;
+            TitlePatternText.Focus();
+            TitlePatternText.SelectAll();
+        }
     }
 
     private static Color? BrushColor(Brush? brush) =>

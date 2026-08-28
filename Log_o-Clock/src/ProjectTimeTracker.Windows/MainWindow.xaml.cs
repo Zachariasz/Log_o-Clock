@@ -11,6 +11,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using ProjectTimeTracker.Core;
 using ProjectTimeTracker.Infrastructure;
@@ -89,6 +90,13 @@ public partial class MainWindow : Window
     private bool _updatingTaskFilter;
     private bool _updatingTargetFilter;
     private bool _updatingAutomaticRecognitionControls;
+    private bool _updatingAutomationLearningControls;
+    private string _automationSearchText = string.Empty;
+    private AutomationLearningNotice? _automationLearningNotice;
+    private readonly DispatcherTimer _automationNoticeTimer = new()
+    {
+        Interval = TimeSpan.FromSeconds(30),
+    };
     private TextBox? _timerTaskEditor;
     private ListCollectionView? _timerTaskSearchView;
     private string _timerTaskSearchText = string.Empty;
@@ -248,6 +256,9 @@ public partial class MainWindow : Window
         _controller.DataChanged += Controller_DataChanged;
         _controller.IdleProtectionChanged += Controller_IdleProtectionChanged;
         _controller.AutomaticRecognitionSettingsChanged += Controller_AutomaticRecognitionSettingsChanged;
+        _controller.AutomationLearningSettingsChanged += Controller_AutomationLearningSettingsChanged;
+        _controller.AutomationLearningNoticeChanged += Controller_AutomationLearningNoticeChanged;
+        _automationNoticeTimer.Tick += AutomationNoticeTimer_Tick;
         _trelloSync.SyncCompleted += TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted += GoogleSheetsSync_SyncCompleted;
         _updateCheck.StateChanged += UpdateCheck_StateChanged;
@@ -282,6 +293,10 @@ public partial class MainWindow : Window
         _windowSource = null;
         _controller.IdleProtectionChanged -= Controller_IdleProtectionChanged;
         _controller.AutomaticRecognitionSettingsChanged -= Controller_AutomaticRecognitionSettingsChanged;
+        _controller.AutomationLearningSettingsChanged -= Controller_AutomationLearningSettingsChanged;
+        _controller.AutomationLearningNoticeChanged -= Controller_AutomationLearningNoticeChanged;
+        _automationNoticeTimer.Stop();
+        _automationNoticeTimer.Tick -= AutomationNoticeTimer_Tick;
         _trelloSync.SyncCompleted -= TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted -= GoogleSheetsSync_SyncCompleted;
         _updateCheck.StateChanged -= UpdateCheck_StateChanged;
@@ -1075,7 +1090,10 @@ public partial class MainWindow : Window
             HistoryDescriptionFilterText, HistoryGrid,
             HistorySaveViewButton, HistoryClearSortingButton, HistoryColumnsButton,
             HistoryThisMonthButton, HistoryThisWeekButton, HistoryTodayButton,
-            ClientsGrid, ProjectsGrid, TargetProjectCombo, CustomTargetsGrid, TaskProjectCombo, TasksGrid, TagsGrid, SoftwareProjectCombo, SoftwareGrid, RuleProjectCombo, RulesGrid,
+            ClientsGrid, ProjectsGrid, TargetProjectCombo, CustomTargetsGrid, TaskProjectCombo, TasksGrid, TagsGrid,
+            AutomationProjectCombo, AutomationSearchText, AutomationLearningCheck,
+            AutomationNeedsAttentionPanel, AutomationSoftwareGrid, AutomationRulesGrid,
+            SoftwareProjectCombo, SoftwareGrid, RuleProjectCombo, RulesGrid,
             ReportRangePicker, ReportClientCombo, ReportProjectCombo, ReportTaskCombo,
             ReportThisMonthButton, ReportThisWeekButton, ReportTodayButton,
             ReportTagCombo, ReportPaidCombo, ReportChartTabs,
@@ -1267,6 +1285,25 @@ public partial class MainWindow : Window
                 "Window Rules must use equal flexible widths without forcing Application beyond the viewport.");
         }
 
+        var visibleManagementHeaders = ManagementTabs.Items.OfType<TabItem>()
+            .Where(tab => tab.Visibility == Visibility.Visible)
+            .Select(tab => tab.Header as string)
+            .ToArray();
+        if (!visibleManagementHeaders.Contains("Automation", StringComparer.Ordinal) ||
+            visibleManagementHeaders.Contains("Software", StringComparer.Ordinal) ||
+            visibleManagementHeaders.Contains("Window rules", StringComparer.Ordinal) ||
+            AutomationSoftwareGrid.SelectionMode != DataGridSelectionMode.Single ||
+            AutomationRulesGrid.SelectionMode != DataGridSelectionMode.Extended ||
+            AutomationSoftwareGrid.Columns.All(column =>
+                !string.Equals(column.Header as string, "Rules", StringComparison.Ordinal)) ||
+            AutomationSoftwareGrid.Parent is not Grid automationMasterDetailHost ||
+            AutomationRulesGrid.Parent is not Grid ||
+            automationMasterDetailHost.MinWidth < 920d)
+        {
+            throw new InvalidOperationException(
+                "Automation must replace the separate Software and Window rules tabs with a searchable master-detail view and narrow-layout horizontal access.");
+        }
+
         if (TagsGrid.ContextMenu?.Items.OfType<MenuItem>()
                 .All(item => !string.Equals(item.Header as string, "Remove", StringComparison.Ordinal)) != false)
         {
@@ -1310,7 +1347,8 @@ public partial class MainWindow : Window
 
         foreach (var list in new ItemsControl[]
                   {
-                      HistoryGrid, ClientsGrid, ProjectsGrid, CustomTargetsGrid, TasksGrid, TagsGrid, SoftwareGrid, RulesGrid,
+                      HistoryGrid, ClientsGrid, ProjectsGrid, CustomTargetsGrid, TasksGrid, TagsGrid,
+                      AutomationSoftwareGrid, AutomationRulesGrid, SoftwareGrid, RulesGrid,
                      ReportGrid, ReportTargetsList, TargetsGrid, FloatingTargetsGrid,
                  })
         {
@@ -1408,6 +1446,8 @@ public partial class MainWindow : Window
         VerifyRowOrEmptyMenu(TasksGrid.ContextMenu, "TaskOnly", "Tasks");
         VerifyRowOrEmptyMenu(SoftwareGrid.ContextMenu, "SoftwareOnly", "Software");
         VerifyRowOrEmptyMenu(RulesGrid.ContextMenu, "RuleOnly", "Window rules");
+        VerifyRowOrEmptyMenu(AutomationSoftwareGrid.ContextMenu, "SoftwareOnly", "Automation software");
+        VerifyRowOrEmptyMenu(AutomationRulesGrid.ContextMenu, "RuleOnly", "Automation rules");
 
         if (ClientsGrid.Parent is not Grid { Children.Count: 1 })
         {
@@ -2103,50 +2143,53 @@ public partial class MainWindow : Window
         }
 
         VerifyVisibleRuleGroups();
-        ApplyRuleGridDefaultColumnWidths(RulesGrid);
-        RulesGrid.UpdateLayout();
-        if (RulesGrid.Columns.Count != 2 ||
-            Math.Abs(RulesGrid.Columns[0].ActualWidth - RulesGrid.Columns[1].ActualWidth) > 1d)
+        AutomationRulesGrid.UpdateLayout();
+        if (AutomationRulesGrid.Columns.Count != 2 ||
+            AutomationRulesGrid.Columns[0].MinWidth < 180d)
         {
             throw new InvalidOperationException(
-                "The Window Rules columns do not share the available width equally.");
+                "Automation recognition detail is missing its title/application columns.");
         }
 
-        var option = RuleProjectCombo.Items
+        var option = AutomationProjectCombo.Items
             .OfType<ProjectFilterOption>()
             .FirstOrDefault(item => item.ProjectId == projectId)
-            ?? throw new InvalidOperationException("The requested project is missing from the Window Rules filter.");
+            ?? throw new InvalidOperationException("The requested project is missing from the Automation filter.");
 
-        _updatingRuleFilter = true;
+        _updatingSoftwareFilter = true;
         try
         {
-            RuleProjectCombo.SelectedItem = option;
+            AutomationProjectCombo.SelectedItem = option;
+            _softwareProjectFilterId = projectId;
             _ruleProjectFilterId = projectId;
         }
         finally
         {
-            _updatingRuleFilter = false;
+            _updatingSoftwareFilter = false;
         }
 
+        ApplySoftwareFilter();
         ApplyRuleFilter();
-        if (!RulesGrid.Items.OfType<RuleRow>().Any() ||
-            RulesGrid.Items.OfType<RuleRow>().Any(row => row.ProjectId != projectId))
+        if (!AutomationRulesGrid.Items.OfType<RuleRow>().Any() ||
+            AutomationRulesGrid.Items.OfType<RuleRow>().Any(row => row.ProjectId != projectId))
         {
-            throw new InvalidOperationException("The Window Rules project filter did not isolate the selected project.");
+            throw new InvalidOperationException("The Automation project filter did not isolate the selected rules.");
         }
 
         VerifyVisibleRuleGroups();
-        _updatingRuleFilter = true;
+        _updatingSoftwareFilter = true;
         try
         {
-            RuleProjectCombo.SelectedIndex = 0;
+            AutomationProjectCombo.SelectedIndex = 0;
+            _softwareProjectFilterId = null;
             _ruleProjectFilterId = null;
         }
         finally
         {
-            _updatingRuleFilter = false;
+            _updatingSoftwareFilter = false;
         }
 
+        ApplySoftwareFilter();
         ApplyRuleFilter();
     }
 
@@ -2230,6 +2273,117 @@ public partial class MainWindow : Window
              !entry.Entry.SoftwareLabels.Contains(expectedLabel, StringComparison.Ordinal)))
         {
             throw new InvalidOperationException("History did not resolve the renamed software label for the existing entry.");
+        }
+    }
+
+    internal void VerifyAutomationForPreview(
+        Guid projectId,
+        Guid softwareId,
+        string processName)
+    {
+        var automationTab = ManagementTabs.Items.OfType<TabItem>()
+            .Single(tab => string.Equals(tab.Header as string, "Automation", StringComparison.Ordinal));
+        if (automationTab.Visibility != Visibility.Visible ||
+            ManagementTabs.Items.OfType<TabItem>().Any(tab =>
+                tab.Visibility == Visibility.Visible &&
+                (string.Equals(tab.Header as string, "Software", StringComparison.Ordinal) ||
+                 string.Equals(tab.Header as string, "Window rules", StringComparison.Ordinal))))
+        {
+            throw new InvalidOperationException(
+                "Automation did not replace the separate Software and Window rules tabs.");
+        }
+
+        var projectOption = AutomationProjectCombo.Items.OfType<ProjectFilterOption>()
+            .Single(option => option.ProjectId == projectId);
+        AutomationProjectCombo.SelectedItem = projectOption;
+        AutomationSearchText.Text = processName;
+        AutomationSoftwareGrid.UpdateLayout();
+        var software = AutomationSoftwareGrid.Items.OfType<SoftwareRow>()
+            .SingleOrDefault(row => row.Software.Id == softwareId)
+            ?? throw new InvalidOperationException(
+                "The shared Automation project/search filter did not reveal the configured application.");
+        AutomationSoftwareGrid.SelectedItem = software;
+        AutomationRulesGrid.UpdateLayout();
+        if (!AutomationRulesGrid.Items.OfType<RuleRow>().Any(rule =>
+                rule.Rule.ProcessName is null ||
+                string.Equals(rule.Rule.ProcessName, processName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                "Selecting an Automation application did not reveal its recognition detail.");
+        }
+
+        AutomationSearchText.Clear();
+        ApplySoftwareFilter();
+        if (!AutomationSoftwareGrid.Items.OfType<AnyApplicationAutomationRow>().Any())
+        {
+            throw new InvalidOperationException(
+                "Title-only rules are missing the synthetic Any application row.");
+        }
+
+        if (AutomationNeedsAttentionPanel.Visibility != Visibility.Visible ||
+            AutomationFrozenSoftwareList.Items.Count == 0 ||
+            AutomationFrozenRulesList.Items.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Automation is missing Needs attention or its collapsed frozen/history sections.");
+        }
+
+        ShowAutomationLearningNotice(new AutomationLearningNotice(
+            AutomationLearningNoticeKind.Onboarding,
+            "Learning preview"));
+        if (!Equals(AutomationNoticePrimaryButton.Content, "Enable learning") ||
+            !Equals(AutomationNoticeSecondaryButton.Content, "Not now"))
+        {
+            throw new InvalidOperationException("Automation onboarding actions are missing.");
+        }
+
+        ShowAutomationLearningNotice(new AutomationLearningNotice(
+            AutomationLearningNoticeKind.NeedsTitle,
+            "Needs title preview",
+            "Private memory-only observed title"));
+        if (AutomationNoticePhraseText.Visibility != Visibility.Visible ||
+            !AutomationNoticeWindowTitleText.Text.Contains(
+                "Private memory-only observed title",
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Automation title review did not keep the observed title in its contextual editor.");
+        }
+
+        ShowAutomationLearningNotice(new AutomationLearningNotice(
+            AutomationLearningNoticeKind.Learned,
+            "Learned preview",
+            ProjectId: projectId,
+            ProcessName: processName));
+        if (!Equals(AutomationNoticePrimaryButton.Content, "Edit") ||
+            !Equals(AutomationNoticeSecondaryButton.Content, "Undo") ||
+            !_automationNoticeTimer.IsEnabled)
+        {
+            throw new InvalidOperationException(
+                "The 30-second learned notification is missing Edit or Undo.");
+        }
+
+        ShowAutomationLearningNotice(null);
+        var originalWidth = Width;
+        try
+        {
+            Width = MinWidth;
+            UpdateLayout();
+            var horizontalHost = FindVisualAncestor<ScrollViewer>(
+                AutomationSoftwareGrid.Parent as DependencyObject
+                ?? AutomationSoftwareGrid);
+            if (horizontalHost is null ||
+                horizontalHost.HorizontalScrollBarVisibility != ScrollBarVisibility.Auto ||
+                horizontalHost.Content is not FrameworkElement { MinWidth: >= 920d })
+            {
+                throw new InvalidOperationException(
+                    "The narrow Automation layout cannot reach both master and detail horizontally.");
+            }
+        }
+        finally
+        {
+            Width = originalWidth;
+            UpdateLayout();
         }
     }
 
@@ -3132,6 +3286,7 @@ public partial class MainWindow : Window
             var customTargets = await _store.GetCustomTargetsAsync();
             var tagSummaries = await _store.GetTagSummariesAsync();
             var software = await _store.GetProjectSoftwareAsync(includeFrozen: true);
+            var softwareDefinitions = await _store.GetSoftwareAsync();
             var clientNames = clients.ToDictionary(client => client.Id, client => client.Name);
             var projectNames = projects.ToDictionary(project => project.Id, project => project.Name);
             var projectsById = projects.ToDictionary(project => project.Id);
@@ -3207,7 +3362,15 @@ public partial class MainWindow : Window
                               row.Summary.Tag.AssignedProjectIds.Count > 0 &&
                               row.Summary.Tag.AssignedProjectIds.All(frozenProjectIds.Contains))
                 .ToArray();
-            var softwareRows = software.Select(item => new SoftwareRow(item)).ToArray();
+            var softwareRows = software.Select(item => new SoftwareRow(
+                item,
+                rules.Count(rule =>
+                    rule.ProcessName is not null &&
+                    string.Equals(
+                        rule.ProcessName,
+                        item.Software.ProcessName,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    (item.IsGlobal || rule.ProjectId == item.ProjectId)))).ToArray();
             _softwareRows = softwareRows
                 .Where(row => row.IsGlobal || !frozenProjectIds.Contains(row.ProjectId))
                 .ToArray();
@@ -3215,6 +3378,17 @@ public partial class MainWindow : Window
                 .Where(row => !row.IsGlobal && frozenProjectIds.Contains(row.ProjectId))
                 .ToArray();
             FrozenSoftwareList.ItemsSource = _frozenSoftwareRows;
+            var configuredSoftwareIds = software
+                .Select(item => item.Software.Id)
+                .ToHashSet();
+            var historyOnlySoftwareRows = softwareDefinitions
+                .Where(item => !configuredSoftwareIds.Contains(item.Id) && item.EntryCount > 0)
+                .Select(item => new HistoryOnlySoftwareRow(item))
+                .ToArray();
+            AutomationFrozenSoftwareList.ItemsSource = _frozenSoftwareRows
+                .Cast<object>()
+                .Concat(historyOnlySoftwareRows)
+                .ToArray();
             UpdateSoftwareFilterOptions();
             ApplySoftwareFilter();
             var ruleRows = rules
@@ -3233,8 +3407,12 @@ public partial class MainWindow : Window
             _ruleRows = ruleRows.Where(row => !frozenProjectIds.Contains(row.Rule.ProjectId)).ToArray();
             _frozenRuleRows = ruleRows.Where(row => frozenProjectIds.Contains(row.Rule.ProjectId)).ToArray();
             FrozenRulesList.ItemsSource = _frozenRuleRows;
+            AutomationFrozenRulesList.ItemsSource = _frozenRuleRows;
             UpdateRuleFilterOptions();
             ApplyRuleFilter();
+            ApplySoftwareFilter();
+            UpdateAutomationNeedsAttention();
+            UpdateAutomationLearningControls();
 
             var runningTaskId = _controller.RunningEntry?.TaskId;
             await ReloadTimerTasksAsync(
@@ -7246,6 +7424,90 @@ public partial class MainWindow : Window
         await ShowSoftwareDialogAsync(null);
     }
 
+    private async void AddAutomation_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await ShowSoftwareDialogAsync(null);
+    }
+
+    private async void CaptureCurrentAutomation_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        var activity = _controller.CurrentActivity;
+        if (activity is null || string.IsNullOrWhiteSpace(activity.ProcessName))
+        {
+            MessageBox.Show(
+                this,
+                "No external window has been observed yet. Open the application, return here, and try again — or use the three-second capture in Add automation.",
+                "Nothing to capture",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+            return;
+        }
+
+        await ShowSoftwareDialogAsync(null, activity);
+    }
+
+    private async void EditAutomationSoftware_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (AutomationSoftwareGrid.SelectedItem is SoftwareRow row)
+        {
+            await ShowSoftwareDialogAsync(row);
+        }
+    }
+
+    private async void RemoveAutomationSoftware_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (AutomationSoftwareGrid.SelectedItem is SoftwareRow row)
+        {
+            await RemoveSoftwareFromListAsync(row, requireConfirmation: true);
+        }
+    }
+
+    private async void AutomationSoftwareGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        _ = sender;
+        if (GetDataGridRowItem<SoftwareRow>(AutomationSoftwareGrid, e) is not { } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        AutomationSoftwareGrid.SelectedItem = row;
+        await ShowSoftwareDialogAsync(row);
+    }
+
+    private void AutomationSoftwareGrid_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (AutomationSoftwareGrid.SelectedItem is SoftwareRow row)
+        {
+            AutomationRulesDescription.Text =
+                $"Title rules for {row.Label}. Any-application rules for the selected project are also included.";
+        }
+        else if (AutomationSoftwareGrid.SelectedItem is AnyApplicationAutomationRow)
+        {
+            AutomationRulesDescription.Text =
+                "Title-only recognition rules that can match any application.";
+        }
+        else
+        {
+            AutomationRulesDescription.Text =
+                "Select an application to see its title rules. Any-application rules are always included.";
+        }
+
+        ApplyRuleFilter();
+    }
+
     private async void RemoveSoftwareFromList_Click(object sender, RoutedEventArgs e)
     {
         _ = sender;
@@ -7303,14 +7565,19 @@ public partial class MainWindow : Window
         await ShowSoftwareDialogAsync(row);
     }
 
-    private async Task ShowSoftwareDialogAsync(SoftwareRow? row)
+    private async Task ShowSoftwareDialogAsync(
+        SoftwareRow? row,
+        WindowActivity? initialActivity = null)
     {
         var dialog = new SoftwareSettingsWindow(
             row?.Setting,
             _tagDefinitions,
             _projectOptions,
             _softwareProjectFilterId,
-            () => _controller.CurrentActivity)
+            () => _controller.CurrentActivity,
+            titlePattern: null,
+            initialActivity: initialActivity,
+            availableRules: _ruleRows.Select(item => item.Rule).ToArray())
         {
             Owner = this,
         };
@@ -7321,6 +7588,13 @@ public partial class MainWindow : Window
 
         try
         {
+            if (dialog.TitlePattern is not null &&
+                dialog.ProjectId == SystemEntityIds.GlobalSoftwareScopeId)
+            {
+                throw new InvalidOperationException(
+                    "Choose a project scope before adding a title recognition phrase.");
+            }
+
             var selectedTagIds = await ResolveSoftwareTagIdsAsync(
                 dialog.SelectedTagNames,
                 dialog.ProjectId);
@@ -7343,7 +7617,10 @@ public partial class MainWindow : Window
                     selectedTagIds);
             }
 
+            await SynchronizeAutomationRulesAsync(dialog);
+
             await _controller.ReloadSoftwareSettingsAsync();
+            await _controller.ReloadRecognitionAsync();
             await RefreshAllAsync();
         }
         catch (Exception exception)
@@ -7354,6 +7631,66 @@ public partial class MainWindow : Window
                 row is null ? "Could not add software" : "Could not update software",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+        }
+    }
+
+    private async Task SynchronizeAutomationRulesAsync(SoftwareSettingsWindow dialog)
+    {
+        var processName = Path.GetFileNameWithoutExtension(dialog.ProcessName.Trim());
+        var desiredProcessPatterns = new[] { dialog.TitlePattern }
+            .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+            .Select(pattern => pattern!)
+            .Concat(dialog.AdditionalTitlePatterns)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var existingProcessRules = _ruleRows
+            .Where(row =>
+                row.ProjectId == dialog.ProjectId &&
+                    row.Rule.ProcessName is not null &&
+                    string.Equals(
+                        row.Rule.ProcessName,
+                    processName,
+                    StringComparison.OrdinalIgnoreCase))
+            .Select(row => row.Rule)
+            .ToArray();
+        await SynchronizeRuleSetAsync(
+            dialog.ProjectId,
+            processName,
+            existingProcessRules,
+            desiredProcessPatterns);
+
+        var existingAnyApplicationRules = _ruleRows
+            .Where(row => row.ProjectId == dialog.ProjectId && row.Rule.ProcessName is null)
+            .Select(row => row.Rule)
+            .ToArray();
+        await SynchronizeRuleSetAsync(
+            dialog.ProjectId,
+            processName: null,
+            existingAnyApplicationRules,
+            dialog.AnyApplicationTitlePatterns);
+    }
+
+    private async Task SynchronizeRuleSetAsync(
+        Guid projectId,
+        string? processName,
+        IReadOnlyList<RecognitionRule> existingRules,
+        IReadOnlyList<string> desiredPatterns)
+    {
+        foreach (var rule in existingRules.Where(rule =>
+                     !desiredPatterns.Contains(
+                         rule.TitlePattern,
+                         StringComparer.OrdinalIgnoreCase)))
+        {
+            await _store.DeleteRuleAsync(rule.Id);
+        }
+
+        foreach (var pattern in desiredPatterns.Where(pattern =>
+                     !existingRules.Any(rule => string.Equals(
+                         rule.TitlePattern,
+                         pattern,
+                         StringComparison.OrdinalIgnoreCase))))
+        {
+            await _store.AddRuleAsync(projectId, pattern, processName);
         }
     }
 
@@ -7390,7 +7727,9 @@ public partial class MainWindow : Window
 
         _softwareProjectFilterId =
             (SoftwareProjectCombo.SelectedItem as ProjectFilterOption)?.ProjectId;
+        _ruleProjectFilterId = _softwareProjectFilterId;
         ApplySoftwareFilter();
+        ApplyRuleFilter();
     }
 
     private void UpdateSoftwareFilterOptions()
@@ -7411,6 +7750,9 @@ public partial class MainWindow : Window
             SoftwareProjectCombo.ItemsSource = options;
             SoftwareProjectCombo.SelectedItem = options.FirstOrDefault(option =>
                 option.ProjectId == _softwareProjectFilterId) ?? options[0];
+            AutomationProjectCombo.ItemsSource = options;
+            AutomationProjectCombo.SelectedItem = options.FirstOrDefault(option =>
+                option.ProjectId == _softwareProjectFilterId) ?? options[0];
             _softwareProjectFilterId =
                 (SoftwareProjectCombo.SelectedItem as ProjectFilterOption)?.ProjectId;
         }
@@ -7429,13 +7771,78 @@ public partial class MainWindow : Window
                 row.ProjectId == projectId || row.IsGlobal);
         }
 
-        SoftwareGrid.ItemsSource = filtered
+        if (!string.IsNullOrWhiteSpace(_automationSearchText))
+        {
+            filtered = filtered.Where(row =>
+                ContainsAutomationSearch(row.Label) ||
+                ContainsAutomationSearch(row.Process) ||
+                ContainsAutomationSearch(row.Project) ||
+                ContainsAutomationSearch(row.Client) ||
+                ContainsAutomationSearch(row.TagsSource));
+        }
+
+        var rows = filtered
             .OrderBy(row => row.Project, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Client, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
             .ThenBy(row => row.Process, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        SoftwareGrid.ItemsSource = rows;
+        var anyApplicationRuleCount = _ruleRows.Count(row =>
+            row.Rule.ProcessName is null &&
+            (_softwareProjectFilterId is null || row.ProjectId == _softwareProjectFilterId) &&
+            (string.IsNullOrWhiteSpace(_automationSearchText) ||
+             ContainsAutomationSearch("Any application") ||
+             ContainsAutomationSearch(row.TitlePattern) ||
+             ContainsAutomationSearch(row.Project)));
+        if (anyApplicationRuleCount > 0)
+        {
+            var selectedProjectName = _softwareProjectFilterId is { } selectedProjectId
+                ? _projectOptions.FirstOrDefault(project =>
+                    project.ProjectId == selectedProjectId)?.ProjectName ?? "Selected project"
+                : "All projects";
+            AutomationSoftwareGrid.ItemsSource = new object[]
+            {
+                new AnyApplicationAutomationRow(
+                    _softwareProjectFilterId,
+                    selectedProjectName,
+                    anyApplicationRuleCount),
+            }.Concat(rows).ToArray();
+        }
+        else
+        {
+            AutomationSoftwareGrid.ItemsSource = rows;
+        }
     }
+
+    private void AutomationProjectFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingSoftwareFilter)
+        {
+            return;
+        }
+
+        _softwareProjectFilterId =
+            (AutomationProjectCombo.SelectedItem as ProjectFilterOption)?.ProjectId;
+        _ruleProjectFilterId = _softwareProjectFilterId;
+        ApplySoftwareFilter();
+        ApplyRuleFilter();
+        UpdateAutomationNeedsAttention();
+    }
+
+    private void AutomationSearchText_Changed(object sender, TextChangedEventArgs e)
+    {
+        _ = e;
+        _automationSearchText = (sender as TextBox)?.Text.Trim() ?? string.Empty;
+        ApplySoftwareFilter();
+        ApplyRuleFilter();
+    }
+
+    private bool ContainsAutomationSearch(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Contains(_automationSearchText, StringComparison.OrdinalIgnoreCase);
 
     private async void AddRule_Click(object sender, RoutedEventArgs e)
     {
@@ -7497,9 +7904,93 @@ public partial class MainWindow : Window
             filtered = filtered.Where(row => row.ProjectId == projectId);
         }
 
-        var view = new ListCollectionView(filtered.ToList());
+        if (AutomationSoftwareGrid.SelectedItem is SoftwareRow software)
+        {
+            filtered = filtered.Where(row =>
+                row.Rule.ProcessName is null ||
+                string.Equals(
+                    row.Rule.ProcessName,
+                    software.Process,
+                    StringComparison.OrdinalIgnoreCase));
+        }
+        else if (AutomationSoftwareGrid.SelectedItem is AnyApplicationAutomationRow)
+        {
+            filtered = filtered.Where(row => row.Rule.ProcessName is null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_automationSearchText))
+        {
+            filtered = filtered.Where(row =>
+                ContainsAutomationSearch(row.TitlePattern) ||
+                ContainsAutomationSearch(row.Process) ||
+                ContainsAutomationSearch(row.Project) ||
+                ContainsAutomationSearch(row.Client));
+        }
+
+        var filteredRows = filtered.ToList();
+        var view = new ListCollectionView(filteredRows);
         view.GroupDescriptions.Add(new PropertyGroupDescription(nameof(RuleRow.ProjectGroup)));
         RulesGrid.ItemsSource = view;
+        AutomationRulesGrid.ItemsSource = filteredRows;
+    }
+
+    private void UpdateAutomationNeedsAttention()
+    {
+        var scopedSoftware = _softwareRows.Where(row =>
+            _softwareProjectFilterId is null ||
+            row.IsGlobal ||
+            row.ProjectId == _softwareProjectFilterId).ToArray();
+        var missingTitleCount = scopedSoftware.Count(software =>
+            !software.IsGlobal &&
+            !software.Setting.IsExcluded &&
+            !_ruleRows.Any(rule =>
+                rule.ProjectId == software.ProjectId &&
+                rule.Rule.ProcessName is not null &&
+                string.Equals(
+                    rule.Rule.ProcessName,
+                    software.Process,
+                    StringComparison.OrdinalIgnoreCase)));
+        var excludedCount = scopedSoftware.Count(software => software.Setting.IsExcluded);
+        var conflictCount = _ruleRows
+            .SelectMany((left, index) => _ruleRows.Skip(index + 1), (left, right) => (left, right))
+            .Count(pair =>
+                pair.left.ProjectId != pair.right.ProjectId &&
+                (_softwareProjectFilterId is null ||
+                 pair.left.ProjectId == _softwareProjectFilterId ||
+                 pair.right.ProjectId == _softwareProjectFilterId) &&
+                (pair.left.Rule.ProcessName is null ||
+                 pair.right.Rule.ProcessName is null ||
+                 string.Equals(
+                     pair.left.Rule.ProcessName,
+                     pair.right.Rule.ProcessName,
+                     StringComparison.OrdinalIgnoreCase)) &&
+                (pair.left.TitlePattern.Contains(
+                     pair.right.TitlePattern,
+                     StringComparison.OrdinalIgnoreCase) ||
+                 pair.right.TitlePattern.Contains(
+                     pair.left.TitlePattern,
+                     StringComparison.OrdinalIgnoreCase)));
+
+        var messages = new List<string>(3);
+        if (missingTitleCount > 0)
+        {
+            messages.Add($"{missingTitleCount} tracked application{(missingTitleCount == 1 ? " needs" : "s need")} a title phrase");
+        }
+
+        if (conflictCount > 0)
+        {
+            messages.Add($"{conflictCount} overlapping rule set{(conflictCount == 1 ? string.Empty : "s")}");
+        }
+
+        if (excludedCount > 0)
+        {
+            messages.Add($"{excludedCount} excluded application{(excludedCount == 1 ? string.Empty : "s")} will not be learned");
+        }
+
+        AutomationNeedsAttentionText.Text = string.Join(" · ", messages);
+        AutomationNeedsAttentionPanel.Visibility = messages.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private async void EditRule_Click(object sender, RoutedEventArgs e)
@@ -7563,6 +8054,49 @@ public partial class MainWindow : Window
         }
     }
 
+    private async void EditAutomationRule_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        var rows = GetSelectedRows<RuleRow>(AutomationRulesGrid);
+        if (rows.Length == 1)
+        {
+            await ShowRuleDialogAsync(rows[0]);
+        }
+        else if (rows.Length > 1)
+        {
+            await BulkEditRulesAsync(rows);
+        }
+    }
+
+    private async void AutomationRulesGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        _ = sender;
+        if (GetDataGridRowItem<RuleRow>(AutomationRulesGrid, e) is not { } row)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var rows = GetSelectedRows<RuleRow>(AutomationRulesGrid);
+        if (rows.Length > 1 && rows.Contains(row))
+        {
+            await BulkEditRulesAsync(rows);
+        }
+        else
+        {
+            AutomationRulesGrid.SelectedItem = row;
+            await ShowRuleDialogAsync(row);
+        }
+    }
+
+    private async void DeleteAutomationRule_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        await DeleteRulesAsync(GetSelectedRows<RuleRow>(AutomationRulesGrid));
+    }
+
     private void RulesGrid_Loaded(object sender, RoutedEventArgs e)
     {
         _ = e;
@@ -7599,34 +8133,49 @@ public partial class MainWindow : Window
     private async Task ShowRuleDialogAsync(RuleRow? existing)
     {
         var preferredProjectId = existing?.Rule.ProjectId
-            ?? (RuleProjectCombo.SelectedItem as ProjectFilterOption)?.ProjectId
+            ?? _ruleProjectFilterId
             ?? (ProjectsGrid.SelectedItem as ProjectRow)?.Project.Id
             ?? (TimerProjectCombo.SelectedValue is Guid timerProjectId ? timerProjectId : (Guid?)null);
-        var dialog = new RuleDialog(
-            _projectOptions,
-            preferredProjectId,
-            existing?.Rule.TitlePattern ?? string.Empty,
-            existing?.Rule.ProcessName,
-            () => _controller.CurrentActivity,
-            isEditing: existing is not null)
+        var dialog = new SoftwareSettingsWindow(
+            setting: null,
+            availableTags: _tagDefinitions,
+            projects: _projectOptions,
+            selectedProjectId: preferredProjectId,
+            captureCurrentActivity: () => _controller.CurrentActivity,
+            titlePattern: existing?.Rule.TitlePattern,
+            initialActivity: null,
+            availableRules: _ruleRows.Select(item => item.Rule).ToArray(),
+            ruleOnly: true,
+            initialProcessName: existing?.Rule.ProcessName)
         {
             Owner = this,
         };
-        if (dialog.ShowDialog() != true || dialog.ProjectId is not { } projectId)
+        if (dialog.ShowDialog() != true)
         {
             return;
         }
 
+        var processName = string.IsNullOrWhiteSpace(dialog.ProcessName)
+            ? null
+            : dialog.ProcessName;
+
         if (existing is null)
         {
             await RunCrudAsync(
-                () => _store.AddRuleAsync(projectId, dialog.TitlePattern, dialog.ProcessName),
+                () => _store.AddRuleAsync(
+                    dialog.ProjectId,
+                    dialog.TitlePattern!,
+                    processName),
                 reloadRecognition: true);
         }
         else
         {
             await RunCrudAsync(
-                () => _store.UpdateRuleAsync(existing.Rule.Id, projectId, dialog.TitlePattern, dialog.ProcessName),
+                () => _store.UpdateRuleAsync(
+                    existing.Rule.Id,
+                    dialog.ProjectId,
+                    dialog.TitlePattern!,
+                    processName),
                 reloadRecognition: true);
         }
     }
@@ -7635,18 +8184,22 @@ public partial class MainWindow : Window
     {
         _ = sender;
         _ = e;
-        var rows = GetSelectedRows<RuleRow>(RulesGrid);
-        if (rows.Length == 0)
+        await DeleteRulesAsync(GetSelectedRows<RuleRow>(RulesGrid));
+    }
+
+    private async Task DeleteRulesAsync(IReadOnlyList<RuleRow> rows)
+    {
+        if (rows.Count == 0)
         {
             return;
         }
 
         if (MessageBox.Show(
                 this,
-                rows.Length == 1
+                rows.Count == 1
                     ? $"Remove the window rule ‘{rows[0].TitlePattern}’?"
-                    : $"Remove {rows.Length} selected window rules?",
-                rows.Length == 1 ? "Remove rule" : "Remove rules",
+                    : $"Remove {rows.Count} selected window rules?",
+                rows.Count == 1 ? "Remove rule" : "Remove rules",
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Question) != MessageBoxResult.Yes)
         {
@@ -8851,6 +9404,246 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             ShowError("Could not export the CSV", exception);
+        }
+    }
+
+    private void Controller_AutomationLearningSettingsChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(UpdateAutomationLearningControls);
+            return;
+        }
+
+        UpdateAutomationLearningControls();
+    }
+
+    private void UpdateAutomationLearningControls()
+    {
+        _updatingAutomationLearningControls = true;
+        try
+        {
+            AutomationLearningCheck.IsChecked = _controller.AutomationLearningEnabled;
+        }
+        finally
+        {
+            _updatingAutomationLearningControls = false;
+        }
+    }
+
+    private async void AutomationLearningCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingAutomationLearningControls)
+        {
+            return;
+        }
+
+        try
+        {
+            await _controller.SetAutomationLearningEnabledAsync(
+                AutomationLearningCheck.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            UpdateAutomationLearningControls();
+            ShowError("Could not update automation learning", exception);
+        }
+    }
+
+    private void Controller_AutomationLearningNoticeChanged(
+        object? sender,
+        AutomationLearningNotice? notice)
+    {
+        _ = sender;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(() => ShowAutomationLearningNotice(notice));
+            return;
+        }
+
+        ShowAutomationLearningNotice(notice);
+    }
+
+    private void ShowAutomationLearningNotice(AutomationLearningNotice? notice)
+    {
+        _automationLearningNotice = notice;
+        _automationNoticeTimer.Stop();
+        if (notice is null)
+        {
+            AutomationNoticePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        AutomationNoticeMessageText.Text = notice.Message;
+        AutomationNoticeWindowTitleText.Text = notice.WindowTitle is null
+            ? string.Empty
+            : $"Observed window: {notice.WindowTitle}";
+        AutomationNoticeWindowTitleText.Visibility = notice.WindowTitle is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        AutomationNoticePhraseText.Text = notice.TitlePattern ?? string.Empty;
+        AutomationNoticePhraseText.Visibility = notice.Kind is
+            AutomationLearningNoticeKind.NeedsTitle or AutomationLearningNoticeKind.Conflict
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AutomationNoticePrimaryButton.Visibility = Visibility.Visible;
+        AutomationNoticeSecondaryButton.Visibility = Visibility.Visible;
+
+        switch (notice.Kind)
+        {
+            case AutomationLearningNoticeKind.Onboarding:
+                AutomationNoticePrimaryButton.Content = "Enable learning";
+                AutomationNoticeSecondaryButton.Content = "Not now";
+                break;
+            case AutomationLearningNoticeKind.NeedsTitle:
+            case AutomationLearningNoticeKind.Conflict:
+                AutomationNoticePrimaryButton.Content = "Save phrase";
+                AutomationNoticeSecondaryButton.Content = "Keep app only";
+                break;
+            case AutomationLearningNoticeKind.Learned:
+                AutomationNoticePrimaryButton.Content = "Edit";
+                AutomationNoticeSecondaryButton.Content = "Undo";
+                _automationNoticeTimer.Start();
+                break;
+            case AutomationLearningNoticeKind.Blocked:
+                AutomationNoticePrimaryButton.Content = "Edit";
+                AutomationNoticeSecondaryButton.Content = "Dismiss";
+                break;
+            default:
+                AutomationNoticePrimaryButton.Content = notice.ProcessName is null ? "Dismiss" : "Edit";
+                AutomationNoticeSecondaryButton.Visibility = Visibility.Collapsed;
+                _automationNoticeTimer.Start();
+                break;
+        }
+
+        AutomationNoticePanel.Visibility = Visibility.Visible;
+        if (AutomationNoticePhraseText.Visibility == Visibility.Visible)
+        {
+            AutomationNoticePhraseText.Focus();
+        }
+    }
+
+    private async void AutomationNoticePrimary_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_automationLearningNotice is not { } notice)
+        {
+            return;
+        }
+
+        try
+        {
+            switch (notice.Kind)
+            {
+                case AutomationLearningNoticeKind.Onboarding:
+                    await _controller.SetAutomationLearningEnabledAsync(true);
+                    break;
+                case AutomationLearningNoticeKind.NeedsTitle:
+                case AutomationLearningNoticeKind.Conflict:
+                    await _controller.ConfirmAutomationTitleAsync(
+                        AutomationNoticePhraseText.Text);
+                    break;
+                case AutomationLearningNoticeKind.Learned:
+                case AutomationLearningNoticeKind.Blocked:
+                    OpenAutomationForNotice(notice);
+                    _controller.DismissAutomationLearningNotice();
+                    break;
+                default:
+                    if (notice.ProcessName is null)
+                    {
+                        _controller.DismissAutomationLearningNotice();
+                    }
+                    else
+                    {
+                        OpenAutomationForNotice(notice);
+                        _controller.DismissAutomationLearningNotice();
+                    }
+
+                    break;
+            }
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not apply the automation change", exception);
+        }
+    }
+
+    private async void AutomationNoticeSecondary_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (_automationLearningNotice is not { } notice)
+        {
+            return;
+        }
+
+        try
+        {
+            if (notice.Kind == AutomationLearningNoticeKind.Onboarding)
+            {
+                await _controller.SetAutomationLearningEnabledAsync(false);
+            }
+            else if (notice.Kind == AutomationLearningNoticeKind.Learned)
+            {
+                await _controller.UndoLastAutomationLearningAsync();
+            }
+            else
+            {
+                _controller.DismissAutomationLearningNotice();
+            }
+        }
+        catch (Exception exception)
+        {
+            ShowError("Could not undo the automation change", exception);
+        }
+    }
+
+    private void AutomationNoticeClose_Click(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _controller.DismissAutomationLearningNotice();
+    }
+
+    private void AutomationNoticeTimer_Tick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _controller.DismissAutomationLearningNotice();
+    }
+
+    private void OpenAutomationForNotice(AutomationLearningNotice notice)
+    {
+        MainTabs.SelectedIndex = 1;
+        ManagementTabs.SelectedIndex = 5;
+        if (notice.ProjectId is { } projectId)
+        {
+            var option = AutomationProjectCombo.Items.OfType<ProjectFilterOption>()
+                .FirstOrDefault(candidate => candidate.ProjectId == projectId);
+            if (option is not null)
+            {
+                AutomationProjectCombo.SelectedItem = option;
+            }
+        }
+
+        if (notice.ProcessName is not null)
+        {
+            var row = AutomationSoftwareGrid.Items.OfType<SoftwareRow>().FirstOrDefault(candidate =>
+                string.Equals(
+                    candidate.Process,
+                    notice.ProcessName,
+                    StringComparison.OrdinalIgnoreCase) &&
+                (notice.ProjectId is null || candidate.IsGlobal || candidate.ProjectId == notice.ProjectId));
+            if (row is not null)
+            {
+                AutomationSoftwareGrid.SelectedItem = row;
+                AutomationSoftwareGrid.ScrollIntoView(row);
+            }
         }
     }
 

@@ -137,6 +137,14 @@ Full automatic mode supplements the foreground hook with a one-second current-wi
 
 The reminder service owns one active recognition popup. `Gimme break!` snoozes recognition for five minutes. A task typed in a reminder or its automatic details popup is marked notification-created; the store removes it if no entry retains it. Reminder-mode startup deliberately does not treat the already-focused window as a new recognition visit; full automatic mode intentionally evaluates it.
 
+## Automation learning flow
+
+`AutomationLearningPolicy` is a pure Core policy. `AppController` arms its 60-second runtime-only intent only after an explicit manual timer start, tray start, manual project switch, or running-entry project reassignment. Unassigned and frozen projects are rejected, and foreground observation, reminder/automatic recognition, completed History edits, and synchronization cannot arm learning. A currently observed external window is used when available; otherwise the next external window consumes the unexpired intent.
+
+The policy returns only a known project or saved-task phrase already present in the observed title. If neither is safe, the process can be configured while the raw title remains memory-only in a contextual phrase editor. `LearnAutomationAsync` then uses one SQLite transaction to reuse or create the software identity, add the project behavior without changing global scope or exclusions, detect active cross-project candidates, and reuse or create a process-plus-title rule. It reports exact created-record identity for configuration-only undo. `UndoLearnedAutomationAsync` removes only those created settings/rules; recorded `TimeEntrySoftware` and UTC interval history remain intact.
+
+After a successful learn, configured-software timing begins at the later of the qualifying foreground observation and running-entry start. The non-modal notice owns the 30-second Edit/Undo affordance. A conflict or unsafe title instead keeps an editable review notice open, and a dismissed phrase becomes a derived Needs title item in the Automation management view.
+
 ## Idle, media protection, and Windows sessions
 
 ```mermaid

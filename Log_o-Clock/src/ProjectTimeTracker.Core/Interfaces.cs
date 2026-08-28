@@ -231,6 +231,8 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<TagDefinition> AddTagAsync(string name, string color, Guid? projectId = null, CancellationToken cancellationToken = default);
     Task<SoftwareDefinition> AddSoftwareAsync(string processName, string label, Guid projectId, bool isExcluded, IReadOnlyCollection<Guid> tagIds, CancellationToken cancellationToken = default);
     Task<RecognitionRule> AddRuleAsync(Guid projectId, string titlePattern, string? processName, CancellationToken cancellationToken = default);
+    Task<AutomationLearningResult> LearnAutomationAsync(AutomationLearningRequest request, CancellationToken cancellationToken = default);
+    Task UndoLearnedAutomationAsync(AutomationLearningUndo undo, CancellationToken cancellationToken = default);
     Task<CustomTarget> AddCustomTargetAsync(
         string name,
         Guid? projectId,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using ProjectTimeTracker.Core;
 
 namespace ProjectTimeTracker.Windows.ViewModels;
@@ -143,7 +144,7 @@ public sealed record TagRow(TagSummary Summary, IReadOnlyList<ProjectOption> Pro
         .ToArray();
 }
 
-public sealed record SoftwareRow(ProjectSoftwareDefinition Setting)
+public sealed record SoftwareRow(ProjectSoftwareDefinition Setting, int RuleCount = 0)
 {
     public SoftwareDefinition Software => Setting.Software;
     public Guid ProjectId => Setting.ProjectId;
@@ -153,11 +154,33 @@ public sealed record SoftwareRow(ProjectSoftwareDefinition Setting)
     public string Label => Software.Label;
     public string Process => Software.ProcessName;
     public string TrackingBehavior => Setting.IsExcluded ? "Excluded" : "Tracked";
+    public string RuleCountText => RuleCount.ToString(CultureInfo.CurrentCulture);
     public IReadOnlyList<TagDefinition> TagDefinitions => Setting.Tags;
     public string TagsSource => Setting.Tags.Count > 0
         ? string.Join(' ', Setting.Tags.Select(tag => $"#{tag.Name}"))
         : "—";
     public string Usage => Software.EntryCount == 1 ? "1 log" : $"{Software.EntryCount} logs";
+}
+
+public sealed record AnyApplicationAutomationRow(
+    Guid? ProjectId,
+    string Project,
+    int RuleCount)
+{
+    public string Label => "Any application";
+    public string Process => "Title-only rules";
+    public string TrackingBehavior => "Recognition";
+    public string RuleCountText => RuleCount.ToString(CultureInfo.CurrentCulture);
+    public IReadOnlyList<TagDefinition> TagDefinitions => [];
+    public string TagsSource => "-";
+    public string Usage => "-";
+}
+
+public sealed record HistoryOnlySoftwareRow(SoftwareDefinition Software)
+{
+    public string Label => Software.Label;
+    public string Process => Software.ProcessName;
+    public string Project => "History only";
 }
 
 public sealed record ReportDisplayRow(ReportRow Report)

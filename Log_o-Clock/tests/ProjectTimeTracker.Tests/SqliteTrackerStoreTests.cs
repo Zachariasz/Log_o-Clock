@@ -322,6 +322,164 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task LearningCreatesProjectSoftwareAndTitleRuleAtomicallyAndIdempotently()
+    {
+        var client = await _store.AddClientAsync("Learning client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Phoenix", "#445566");
+        var request = new AutomationLearningRequest(
+            project.Id,
+            "blender.exe",
+            "Blender",
+            "Phoenix scene");
+
+        var learned = await _store.LearnAutomationAsync(request);
+
+        Assert.True(learned.CreatedSoftware);
+        Assert.True(learned.CreatedProjectSetting);
+        Assert.True(learned.CreatedRule);
+        Assert.Equal(AutomationLearningBlockReason.None, learned.BlockReason);
+        Assert.Equal("blender", learned.Software.ProcessName);
+        Assert.Equal("Phoenix scene", learned.Rule?.TitlePattern);
+        var setting = Assert.Single(await _store.GetProjectSoftwareAsync(project.Id));
+        Assert.Equal(learned.Software.Id, setting.Software.Id);
+        Assert.False(setting.IsGlobal);
+        Assert.Contains(
+            await _store.GetRulesAsync(project.Id),
+            rule => rule.Id == learned.Rule?.Id && rule.ProcessName == "blender");
+
+        var repeated = await _store.LearnAutomationAsync(request);
+
+        Assert.False(repeated.HasConfigurationChange);
+        Assert.Equal(learned.Software.Id, repeated.Software.Id);
+        Assert.Equal(learned.Rule?.Id, repeated.Rule?.Id);
+    }
+
+    [Fact]
+    public async Task LearningReusesGlobalSoftwareAndDoesNotOverrideExclusion()
+    {
+        var client = await _store.AddClientAsync("Global learning client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Global learning project", "#445566");
+        var global = await _store.AddSoftwareAsync(
+            "chrome.exe",
+            "Chrome",
+            SystemEntityIds.GlobalSoftwareScopeId,
+            false,
+            []);
+
+        var learned = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            project.Id,
+            "chrome.exe",
+            "Ignored replacement label",
+            "Global learning project"));
+
+        Assert.Equal(global.Id, learned.Software.Id);
+        Assert.False(learned.CreatedSoftware);
+        Assert.False(learned.CreatedProjectSetting);
+        Assert.True(learned.CreatedRule);
+        Assert.True(Assert.Single(await _store.GetProjectSoftwareAsync()).IsGlobal);
+
+        _ = await _store.AddSoftwareAsync(
+            "private.exe",
+            "Private app",
+            SystemEntityIds.GlobalSoftwareScopeId,
+            true,
+            []);
+        var excluded = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            project.Id,
+            "private.exe",
+            "Private app",
+            "Global learning project"));
+
+        Assert.Equal(AutomationLearningBlockReason.Excluded, excluded.BlockReason);
+        Assert.Null(excluded.Rule);
+        Assert.DoesNotContain(
+            await _store.GetRulesAsync(project.Id),
+            rule => string.Equals(rule.ProcessName, "private", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UndoLearnedConfigurationPreservesRecordedSoftwareHistory()
+    {
+        var client = await _store.AddClientAsync("Undo learning client", "#112233");
+        var project = await _store.AddProjectAsync(client.Id, "Undo learning project", "#445566");
+        var learned = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            project.Id,
+            "blender.exe",
+            "Blender",
+            "Undo learning project"));
+        var start = new DateTimeOffset(2026, 8, 27, 8, 0, 0, TimeSpan.Zero);
+        var entry = (await _store.StartOrResumeTimerAsync(
+            project.Id,
+            null,
+            null,
+            TrackingSource.Manual,
+            start,
+            TimeSpan.Zero)).Entry;
+        Assert.True(await _store.TransitionSoftwareUsageAsync(entry.Id, "blender", start));
+        Assert.True(await _store.TransitionSoftwareUsageAsync(entry.Id, null, start.AddMinutes(10)));
+        await _store.StopRunningTimerAsync(start.AddMinutes(20));
+
+        await _store.UndoLearnedAutomationAsync(learned.Undo);
+
+        Assert.Empty(await _store.GetProjectSoftwareAsync(project.Id));
+        Assert.DoesNotContain(
+            await _store.GetRulesAsync(project.Id),
+            rule => rule.Id == learned.Rule?.Id);
+        var report = Assert.Single(await _store.GetSoftwareUsageReportAsync(
+            start,
+            start.AddMinutes(20),
+            new ReportFilter(ProjectId: project.Id)));
+        Assert.Equal(learned.Software.Id, report.SoftwareId);
+        Assert.Equal(10 * 60, report.DurationSeconds);
+    }
+
+    [Fact]
+    public async Task LearningReportsExactCrossProjectRuleConflictsWithoutCreatingAmbiguity()
+    {
+        var (first, second) = await CreateTwoProjectsAsync();
+        var firstLearned = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            first.Id,
+            "shared.exe",
+            "Shared",
+            "Shared title"));
+
+        var secondLearned = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            second.Id,
+            "shared.exe",
+            "Shared",
+            "Shared title"));
+
+        Assert.True(firstLearned.CreatedRule);
+        Assert.True(secondLearned.HasConflict);
+        Assert.Contains(first.Id, secondLearned.ConflictingProjectIds);
+        Assert.Null(secondLearned.Rule);
+        Assert.DoesNotContain(
+            await _store.GetRulesAsync(second.Id),
+            rule => rule.TitlePattern == "Shared title" && rule.ProcessName == "shared");
+    }
+
+    [Fact]
+    public async Task LearningDetectsAnAnyApplicationRuleThatMatchesTheObservedTitle()
+    {
+        var (first, second) = await CreateTwoProjectsAsync();
+        _ = await _store.AddRuleAsync(first.Id, "Project Phoenix", processName: null);
+
+        var learned = await _store.LearnAutomationAsync(new AutomationLearningRequest(
+            second.Id,
+            "blender.exe",
+            "Blender",
+            "Phoenix",
+            "Project Phoenix - Blender"));
+
+        Assert.True(learned.HasConflict);
+        Assert.Contains(first.Id, learned.ConflictingProjectIds);
+        Assert.Null(learned.Rule);
+        Assert.DoesNotContain(
+            await _store.GetRulesAsync(second.Id),
+            rule => rule.TitlePattern == "Phoenix" && rule.ProcessName == "blender");
+    }
+
+    [Fact]
     public async Task FreezingProjectPreservesDataAndRestoresPriorRecognitionRuleStates()
     {
         var client = await _store.AddClientAsync("Freeze client", "#112233");
@@ -3537,6 +3695,8 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await source.SetSettingAsync("recognition.enabled", "false");
         await source.SetSettingAsync(AutomaticRecognitionSettings.EnabledKey, "true");
         await source.SetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, "12");
+        await source.SetSettingAsync(AutomationLearningSettings.EnabledKey, "true");
+        await source.SetSettingAsync(AutomationLearningSettings.OnboardingSeenKey, "true");
         await source.SetSettingAsync(GoogleSheetsSettings.ConnectionKey, "must-not-sync");
         await source.SetSettingAsync(SessionTrackingSettings.ResumeMarkerKey, "must-not-sync");
         await source.SetSettingAsync(SessionTrackingSettings.ReviewEntryKey, Guid.NewGuid().ToString("D"));
@@ -3574,6 +3734,8 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.Equal("false", await target.GetSettingAsync("recognition.enabled"));
         Assert.Equal("true", await target.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey));
         Assert.Equal("12", await target.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey));
+        Assert.Equal("true", await target.GetSettingAsync(AutomationLearningSettings.EnabledKey));
+        Assert.Equal("true", await target.GetSettingAsync(AutomationLearningSettings.OnboardingSeenKey));
         Assert.Null(await target.GetSettingAsync(GoogleSheetsSettings.ConnectionKey));
         Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ResumeMarkerKey));
         Assert.Null(await target.GetSettingAsync(SessionTrackingSettings.ReviewEntryKey));

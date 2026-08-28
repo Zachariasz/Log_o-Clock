@@ -71,7 +71,9 @@ $env:PROJECT_TIME_TRACKER_SMOKE_HEIGHT = "900"
 
 Never run smoke mode without an isolated data directory on a machine containing real Log O'clock data.
 
-Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpanded`, `Projects`, `Targets`, `Tasks`, `Tags`, `Software`, `Rules`, `Reports`, `Settings`, `SettingsIntegrations`, `GoogleSheetsConnection`, and `SyncConflicts`.
+Useful `PROJECT_TIME_TRACKER_SMOKE_VIEW` values include `Clients`, `ClientsExpanded`, `Projects`, `Targets`, `Tasks`, `Tags`, `Automation` (with `Software` and `Rules` retained as compatibility aliases), `Reports`, `Settings`, `SettingsIntegrations`, `GoogleSheetsConnection`, and `SyncConflicts`.
+
+`PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATION=true` seeds tracked, excluded, frozen, history-only, process-specific, and any-application examples. It verifies the shared project/search workflow, master-detail selection, Needs attention, synthetic Any application row, frozen/history sections, onboarding, memory-only title review, 30-second Edit/Undo notice, and narrow-layout horizontal access.
 
 `PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATIC_RECOGNITION=true` uses a fixed foreground monitor to verify silent startup, same-project software continuation, deferred atomic switching, filename task inference, delayed stopping, and the title-bar automatic-mode control without waiting for the real grace period.
 

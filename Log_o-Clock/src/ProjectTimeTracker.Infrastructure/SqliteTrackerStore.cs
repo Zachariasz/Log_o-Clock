@@ -1631,6 +1631,291 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         return rule;
     }
 
+    public async Task<AutomationLearningResult> LearnAutomationAsync(
+        AutomationLearningRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.ProjectId == Guid.Empty ||
+            request.ProjectId == SystemEntityIds.UnassignedProjectId)
+        {
+            throw new ArgumentException("Choose an active project for automation learning.", nameof(request));
+        }
+
+        var processName = NormalizeProcessName(request.ProcessName);
+        var label = Required(request.Label, nameof(request.Label));
+        var titlePattern = string.IsNullOrWhiteSpace(request.TitlePattern)
+            ? null
+            : request.TitlePattern.Trim();
+        var processKey = processName;
+        var projectKey = request.ProjectId.ToString("D");
+        var createdSoftware = false;
+        var createdProjectSetting = false;
+        var createdRule = false;
+        var blockReason = AutomationLearningBlockReason.None;
+        var conflicts = Array.Empty<Guid>();
+        RecognitionRule? rule = null;
+
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        await using (var projectCommand = connection.CreateCommand())
+        {
+            projectCommand.Transaction = transaction;
+            projectCommand.CommandText = """
+                SELECT COUNT(*)
+                FROM Projects p
+                JOIN Clients c ON c.Id = p.ClientId
+                WHERE p.Id = $project
+                  AND p.IsArchived = 0
+                  AND p.IsFrozen = 0
+                  AND c.IsArchived = 0;
+                """;
+            projectCommand.Parameters.AddWithValue("$project", projectKey);
+            if (Convert.ToInt32(await projectCommand.ExecuteScalarAsync(cancellationToken)) != 1)
+            {
+                throw new InvalidOperationException("Automation can learn only for an active project.");
+            }
+        }
+
+        Guid softwareId;
+        string softwareLabel;
+        var softwareIsGlobal = false;
+        var softwareIsExcluded = false;
+        var softwareIsHidden = false;
+        await using (var softwareCommand = connection.CreateCommand())
+        {
+            softwareCommand.Transaction = transaction;
+            softwareCommand.CommandText = """
+                SELECT Id, Label, IsGlobal, IsExcluded, IsHidden
+                FROM Software
+                WHERE ProcessName = $process;
+                """;
+            softwareCommand.Parameters.AddWithValue("$process", processKey);
+            await using var reader = await softwareCommand.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                softwareId = Guid.Parse(reader.GetString(0));
+                softwareLabel = reader.GetString(1);
+                softwareIsGlobal = reader.GetBoolean(2);
+                softwareIsExcluded = reader.GetBoolean(3);
+                softwareIsHidden = reader.GetBoolean(4);
+            }
+            else
+            {
+                softwareId = Guid.NewGuid();
+                softwareLabel = label;
+                await reader.DisposeAsync();
+                await ExecuteInTransactionAsync(
+                    connection,
+                    transaction,
+                    "INSERT INTO Software (Id, ProcessName, Label, IsExcluded, IsHidden, IsGlobal) VALUES ($id, $process, $label, 0, 0, 0);",
+                    cancellationToken,
+                    ("$id", softwareId.ToString("D")),
+                    ("$process", processKey),
+                    ("$label", softwareLabel));
+                createdSoftware = true;
+            }
+        }
+
+        if (softwareIsHidden)
+        {
+            blockReason = AutomationLearningBlockReason.RemovedSoftware;
+        }
+        else if (softwareIsGlobal)
+        {
+            if (softwareIsExcluded)
+            {
+                blockReason = AutomationLearningBlockReason.Excluded;
+            }
+        }
+        else
+        {
+            int? projectExclusion = null;
+            await using (var settingCommand = connection.CreateCommand())
+            {
+                settingCommand.Transaction = transaction;
+                settingCommand.CommandText = """
+                    SELECT IsExcluded
+                    FROM ProjectSoftwareSettings
+                    WHERE ProjectId = $project AND SoftwareId = $software;
+                    """;
+                settingCommand.Parameters.AddWithValue("$project", projectKey);
+                settingCommand.Parameters.AddWithValue("$software", softwareId.ToString("D"));
+                var value = await settingCommand.ExecuteScalarAsync(cancellationToken);
+                projectExclusion = value is null ? null : Convert.ToInt32(value);
+            }
+
+            if (projectExclusion is null)
+            {
+                await ExecuteInTransactionAsync(
+                    connection,
+                    transaction,
+                    "INSERT INTO ProjectSoftwareSettings (ProjectId, SoftwareId, IsExcluded) VALUES ($project, $software, 0);",
+                    cancellationToken,
+                    ("$project", projectKey),
+                    ("$software", softwareId.ToString("D")));
+                createdProjectSetting = true;
+            }
+            else if (projectExclusion != 0)
+            {
+                blockReason = AutomationLearningBlockReason.Excluded;
+            }
+        }
+
+        if (blockReason == AutomationLearningBlockReason.None && titlePattern is not null)
+        {
+            var conflictIds = new List<Guid>();
+            await using (var conflictCommand = connection.CreateCommand())
+            {
+                conflictCommand.Transaction = transaction;
+                conflictCommand.CommandText = """
+                    SELECT DISTINCT r.ProjectId, r.TitlePattern, r.ProcessName
+                    FROM RecognitionRules r
+                    JOIN Projects p ON p.Id = r.ProjectId
+                    JOIN Clients c ON c.Id = p.ClientId
+                    WHERE r.ProjectId <> $project
+                      AND r.IsEnabled = 1
+                      AND p.IsArchived = 0
+                      AND p.IsFrozen = 0
+                      AND c.IsArchived = 0
+                      AND (r.ProcessName IS NULL OR r.ProcessName = $process COLLATE NOCASE);
+                    """;
+                conflictCommand.Parameters.AddWithValue("$project", projectKey);
+                conflictCommand.Parameters.AddWithValue("$process", processKey);
+                await using var reader = await conflictCommand.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var candidatePattern = reader.GetString(1);
+                    var matchesObservedTitle = !string.IsNullOrWhiteSpace(request.ObservedWindowTitle)
+                        ? request.ObservedWindowTitle.Contains(
+                            candidatePattern,
+                            StringComparison.OrdinalIgnoreCase)
+                        : titlePattern.Contains(candidatePattern, StringComparison.OrdinalIgnoreCase) ||
+                          candidatePattern.Contains(titlePattern, StringComparison.OrdinalIgnoreCase);
+                    if (matchesObservedTitle)
+                    {
+                        conflictIds.Add(Guid.Parse(reader.GetString(0)));
+                    }
+                }
+            }
+
+            conflicts = conflictIds.Distinct().ToArray();
+
+            if (conflicts.Length == 0)
+            {
+                await using var existingRuleCommand = connection.CreateCommand();
+                existingRuleCommand.Transaction = transaction;
+                existingRuleCommand.CommandText = """
+                    SELECT Id, IsEnabled
+                    FROM RecognitionRules
+                    WHERE ProjectId = $project
+                      AND TitlePattern = $pattern COLLATE NOCASE
+                      AND COALESCE(ProcessName, '') = $process COLLATE NOCASE;
+                    """;
+                existingRuleCommand.Parameters.AddWithValue("$project", projectKey);
+                existingRuleCommand.Parameters.AddWithValue("$pattern", titlePattern);
+                existingRuleCommand.Parameters.AddWithValue("$process", processKey);
+                await using var reader = await existingRuleCommand.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    rule = new RecognitionRule(
+                        Guid.Parse(reader.GetString(0)),
+                        request.ProjectId,
+                        titlePattern,
+                        processKey,
+                        reader.GetBoolean(1));
+                }
+                else
+                {
+                    var ruleId = Guid.NewGuid();
+                    await reader.DisposeAsync();
+                    await ExecuteInTransactionAsync(
+                        connection,
+                        transaction,
+                        "INSERT INTO RecognitionRules (Id, ProjectId, TitlePattern, ProcessName, IsEnabled) VALUES ($id, $project, $pattern, $process, 1);",
+                        cancellationToken,
+                        ("$id", ruleId.ToString("D")),
+                        ("$project", projectKey),
+                        ("$pattern", titlePattern),
+                        ("$process", processKey));
+                    rule = new RecognitionRule(ruleId, request.ProjectId, titlePattern, processKey);
+                    createdRule = true;
+                }
+            }
+        }
+
+        var entryCount = 0;
+        await using (var countCommand = connection.CreateCommand())
+        {
+            countCommand.Transaction = transaction;
+            countCommand.CommandText = "SELECT COUNT(*) FROM TimeEntrySoftware WHERE SoftwareId = $software;";
+            countCommand.Parameters.AddWithValue("$software", softwareId.ToString("D"));
+            entryCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync(cancellationToken));
+        }
+
+        transaction.Commit();
+        await connection.CloseAsync();
+        if (createdSoftware || createdProjectSetting || createdRule)
+        {
+            await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+        }
+
+        var software = new SoftwareDefinition(
+            softwareId,
+            processKey,
+            softwareLabel,
+            entryCount);
+        var undo = new AutomationLearningUndo(
+            softwareId,
+            request.ProjectId,
+            rule?.Id,
+            createdProjectSetting,
+            createdRule);
+        return new AutomationLearningResult(
+            software,
+            rule,
+            undo,
+            createdSoftware,
+            createdProjectSetting,
+            createdRule,
+            blockReason,
+            conflicts);
+    }
+
+    public async Task UndoLearnedAutomationAsync(
+        AutomationLearningUndo undo,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(undo);
+        await using var connection = await OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+        if (undo.RemoveRule && undo.RuleId is { } ruleId)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "DELETE FROM RecognitionRules WHERE Id = $id;",
+                cancellationToken,
+                ("$id", ruleId.ToString("D")));
+        }
+
+        if (undo.RemoveProjectSetting)
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                "DELETE FROM ProjectSoftwareSettings WHERE ProjectId = $project AND SoftwareId = $software;",
+                cancellationToken,
+                ("$project", undo.ProjectId.ToString("D")),
+                ("$software", undo.SoftwareId.ToString("D")));
+        }
+
+        transaction.Commit();
+        await connection.CloseAsync();
+        await SynchronizeMonthlyLogFilesAsync(cancellationToken);
+    }
+
     public async Task<CustomTarget> AddCustomTargetAsync(
         string name,
         Guid? projectId,

@@ -28,6 +28,7 @@ public sealed class AppController : IAsyncDisposable
     private readonly Dispatcher _dispatcher;
     private readonly RecognitionEngine _recognitionEngine = new();
     private readonly TaskTitleMatcher _taskTitleMatcher = new();
+    private readonly AutomationLearningPolicy _automationLearningPolicy = new();
     private readonly RecognitionPromptPolicy _promptPolicy = new(TimeSpan.Zero);
     private readonly AutomaticRecognitionPolicy _automaticRecognitionPolicy = new(
         TimeSpan.FromMinutes(AutomaticRecognitionSettings.DefaultGraceMinutes));
@@ -49,6 +50,9 @@ public sealed class AppController : IAsyncDisposable
     private WindowActivity? _lastActivity;
     private WindowActivity? _lastExternalActivity;
     private WindowActivity? _lastTrackableActivity;
+    private AutomationLearningIntent? _automationLearningIntent;
+    private PendingAutomationTitleReview? _pendingAutomationTitleReview;
+    private AutomationLearningUndo? _lastAutomationLearningUndo;
     private AutomaticForegroundKey? _lastAutomaticForegroundKey;
     private SoftwareForegroundKey? _lastSoftwareForegroundKey;
     private bool _automaticForegroundSnapshotInitialized;
@@ -118,11 +122,15 @@ public sealed class AppController : IAsyncDisposable
     public event EventHandler<EntryDetailsRequest>? DetailsRequested;
     public event EventHandler<IdleProtectionState>? IdleProtectionChanged;
     public event EventHandler? AutomaticRecognitionSettingsChanged;
+    public event EventHandler? AutomationLearningSettingsChanged;
+    public event EventHandler<AutomationLearningNotice?>? AutomationLearningNoticeChanged;
 
     public TimeEntry? RunningEntry { get; private set; }
     public long RunningExcludedSeconds { get; private set; }
     public bool RecognitionEnabled { get; private set; } = true;
     public bool AutomaticRecognitionEnabled { get; private set; }
+    public bool AutomationLearningEnabled { get; private set; }
+    public bool AutomationLearningOnboardingSeen { get; private set; }
     public int AutomaticRecognitionGraceMinutes { get; private set; } =
         AutomaticRecognitionSettings.DefaultGraceMinutes;
     public bool CallsIdleProtectionEnabled { get; private set; } = true;
@@ -174,6 +182,10 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
         AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
+        AutomationLearningEnabled = AutomationLearningSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomationLearningSettings.EnabledKey, cancellationToken));
+        AutomationLearningOnboardingSeen = AutomationLearningSettings.ParseOnboardingSeen(
+            await _store.GetSettingAsync(AutomationLearningSettings.OnboardingSeenKey, cancellationToken));
         _automaticRecognitionPolicy.SetGracePeriod(
             TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
@@ -316,6 +328,10 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
         AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
+        AutomationLearningEnabled = AutomationLearningSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomationLearningSettings.EnabledKey, cancellationToken));
+        AutomationLearningOnboardingSeen = AutomationLearningSettings.ParseOnboardingSeen(
+            await _store.GetSettingAsync(AutomationLearningSettings.OnboardingSeenKey, cancellationToken));
         _automaticRecognitionPolicy.SetGracePeriod(
             TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
@@ -354,6 +370,7 @@ public sealed class AppController : IAsyncDisposable
         ResetBreakReminderStreak();
         ResetAutomaticRecognitionPolicy();
         AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
+        AutomationLearningSettingsChanged?.Invoke(this, EventArgs.Empty);
         DataChanged?.Invoke(this, EventArgs.Empty);
         if (AutomaticRecognitionEnabled)
         {
@@ -444,6 +461,99 @@ public sealed class AppController : IAsyncDisposable
         {
             _ = ProcessAutomaticRecognitionActionsAsync();
         }
+    }
+
+    public async Task SetAutomationLearningEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        AutomationLearningEnabled = enabled;
+        AutomationLearningOnboardingSeen = true;
+        await _store.SetSettingAsync(
+            AutomationLearningSettings.EnabledKey,
+            enabled ? "true" : "false",
+            cancellationToken);
+        await _store.SetSettingAsync(
+            AutomationLearningSettings.OnboardingSeenKey,
+            "true",
+            cancellationToken);
+        AutomationLearningSettingsChanged?.Invoke(this, EventArgs.Empty);
+        if (!enabled)
+        {
+            _automationLearningIntent = null;
+            _pendingAutomationTitleReview = null;
+            _lastAutomationLearningUndo = null;
+        }
+
+        AutomationLearningNoticeChanged?.Invoke(this, null);
+        if (enabled && _automationLearningIntent is not null)
+        {
+            await TryApplyAutomationLearningAsync(
+                SelectAutomationLearningActivity(),
+                cancellationToken);
+        }
+    }
+
+    public async Task ConfirmAutomationTitleAsync(
+        string titlePattern,
+        CancellationToken cancellationToken = default)
+    {
+        if (_pendingAutomationTitleReview is not { } pending)
+        {
+            return;
+        }
+
+        titlePattern = titlePattern.Trim();
+        if (titlePattern.Length == 0 ||
+            !pending.Activity.Title.Contains(titlePattern, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                "Choose a phrase that appears in the current window title.",
+                nameof(titlePattern));
+        }
+
+        _pendingAutomationTitleReview = null;
+        await CommitAutomationLearningAsync(
+            pending.Intent,
+            pending.Activity,
+            titlePattern,
+            cancellationToken,
+            pending.Undo);
+    }
+
+    public void DismissAutomationLearningNotice()
+    {
+        _pendingAutomationTitleReview = null;
+        AutomationLearningNoticeChanged?.Invoke(this, null);
+    }
+
+    public async Task UndoLastAutomationLearningAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (_lastAutomationLearningUndo is not { } undo)
+        {
+            return;
+        }
+
+        _lastAutomationLearningUndo = null;
+        if (RunningEntry is { } entry)
+        {
+            await TransitionSoftwareUsageAsync(
+                entry.Id,
+                processName: null,
+                _clock.UtcNow,
+                notify: false,
+                cancellationToken);
+        }
+
+        await _store.UndoLearnedAutomationAsync(undo, cancellationToken);
+        _recognitionCandidates = await _store.GetRecognitionCandidatesAsync(cancellationToken);
+        await ReloadSoftwareSettingsCoreAsync(cancellationToken);
+        QueueCurrentSoftwareUsage(force: true);
+        AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+            AutomationLearningNoticeKind.Information,
+            "Automatic configuration undone."));
+        DataChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public async Task SetCallsIdleProtectionEnabledAsync(
@@ -719,6 +829,13 @@ public sealed class AppController : IAsyncDisposable
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
         ReconcileAutomaticRecognitionAfterTimerMutation();
+        if (source == TrackingSource.Manual)
+        {
+            await ArmAutomationLearningAsync(
+                projectId,
+                initialTaskId,
+                cancellationToken);
+        }
         if (showDetails)
         {
             await RequestDetailsAsync(RunningEntry, cancellationToken);
@@ -774,6 +891,7 @@ public sealed class AppController : IAsyncDisposable
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
         ReconcileAutomaticRecognitionAfterTimerMutation();
+        await ArmAutomationLearningAsync(projectId, taskId, cancellationToken);
         return RunningEntry;
     }
 
@@ -938,6 +1056,7 @@ public sealed class AppController : IAsyncDisposable
         if (projectId != previousProjectId)
         {
             ReconcileAutomaticRecognitionAfterTimerMutation();
+            await ArmAutomationLearningAsync(projectId, taskId, cancellationToken);
         }
     }
 
@@ -984,6 +1103,7 @@ public sealed class AppController : IAsyncDisposable
         RunningEntryChanged?.Invoke(this, RunningEntry);
         DataChanged?.Invoke(this, EventArgs.Empty);
         ReconcileAutomaticRecognitionAfterTimerMutation();
+        await ArmAutomationLearningAsync(projectId, taskId, cancellationToken);
         return RunningEntry;
     }
 
@@ -1102,6 +1222,7 @@ public sealed class AppController : IAsyncDisposable
         {
             QueueCurrentSoftwareUsage(force: true);
             ReconcileAutomaticRecognitionAfterTimerMutation();
+            _ = ArmAutomationLearningAsync(projectId, taskId, CancellationToken.None);
         }
     }
 
@@ -1160,6 +1281,10 @@ public sealed class AppController : IAsyncDisposable
         if (IsTrackableProcess(activity.ProcessName))
         {
             _lastExternalActivity = activity;
+            if (AutomationLearningEnabled && _automationLearningIntent is not null)
+            {
+                _ = TryApplyAutomationLearningAsync(activity);
+            }
         }
 
         if (AutomaticRecognitionEnabled)
@@ -1656,6 +1781,252 @@ public sealed class AppController : IAsyncDisposable
         }
 
         _lastTrackableActivity = activity;
+    }
+
+    internal async Task ArmAutomationLearningForPreviewAsync(
+        Guid projectId,
+        Guid? taskId = null)
+    {
+        var project = (await _store.GetProjectOptionsAsync())
+            .Single(option => option.ProjectId == projectId);
+        string? taskName = null;
+        if (taskId is { } selectedTaskId)
+        {
+            taskName = (await _store.GetTasksAsync(projectId))
+                .Single(task => task.Id == selectedTaskId)
+                .Name;
+        }
+
+        _automationLearningIntent = new AutomationLearningIntent(
+            projectId,
+            project.ProjectName,
+            taskName,
+            _clock.MonotonicSeconds);
+    }
+
+    internal Task ApplyAutomationLearningActivityForPreviewAsync(
+        WindowActivity activity) =>
+        TryApplyAutomationLearningAsync(activity, CancellationToken.None);
+
+    private async Task ArmAutomationLearningAsync(
+        Guid projectId,
+        Guid? taskId,
+        CancellationToken cancellationToken)
+    {
+        if (_disposed || projectId == SystemEntityIds.UnassignedProjectId)
+        {
+            return;
+        }
+
+        var project = (await _store.GetProjectOptionsAsync(cancellationToken))
+            .FirstOrDefault(option => option.ProjectId == projectId);
+        if (project is null)
+        {
+            return;
+        }
+
+        string? taskName = null;
+        if (taskId is { } selectedTaskId)
+        {
+            taskName = (await _store.GetTasksAsync(
+                    projectId,
+                    cancellationToken: cancellationToken))
+                .FirstOrDefault(task => task.Id == selectedTaskId)?.Name;
+        }
+
+        _automationLearningIntent = new AutomationLearningIntent(
+            projectId,
+            project.ProjectName,
+            taskName,
+            _clock.MonotonicSeconds);
+        if (!AutomationLearningOnboardingSeen)
+        {
+            AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+                AutomationLearningNoticeKind.Onboarding,
+                "Let Log O'clock learn apps and title rules from your manual project choices?",
+                ProjectId: projectId,
+                ProjectName: project.ProjectName));
+            return;
+        }
+
+        if (!AutomationLearningEnabled)
+        {
+            _automationLearningIntent = null;
+            return;
+        }
+
+        await TryApplyAutomationLearningAsync(
+            SelectAutomationLearningActivity(),
+            cancellationToken);
+    }
+
+    private WindowActivity? SelectAutomationLearningActivity()
+    {
+        var current = _foregroundMonitor.GetCurrentActivity();
+        if (current is not null && IsTrackableProcess(current.ProcessName))
+        {
+            return current;
+        }
+
+        return _lastExternalActivity is { } recent &&
+               _clock.UtcNow - recent.ObservedUtc <= TimeSpan.FromSeconds(15)
+            ? recent
+            : null;
+    }
+
+    private async Task TryApplyAutomationLearningAsync(
+        WindowActivity? activity,
+        CancellationToken cancellationToken = default)
+    {
+        if (!AutomationLearningEnabled ||
+            _automationLearningIntent is not { } intent ||
+            activity is null ||
+            !IsTrackableProcess(activity.ProcessName))
+        {
+            return;
+        }
+
+        var decision = _automationLearningPolicy.Evaluate(
+            intent,
+            activity,
+            _clock.MonotonicSeconds);
+        if (decision.Kind == AutomationLearningDecisionKind.Expired)
+        {
+            _automationLearningIntent = null;
+            return;
+        }
+
+        if (decision.Kind == AutomationLearningDecisionKind.Ignore)
+        {
+            return;
+        }
+
+        _automationLearningIntent = null;
+        await CommitAutomationLearningAsync(
+            intent,
+            activity,
+            decision.TitlePattern,
+            cancellationToken);
+    }
+
+    private async Task CommitAutomationLearningAsync(
+        AutomationLearningIntent intent,
+        WindowActivity activity,
+        string? titlePattern,
+        CancellationToken cancellationToken,
+        AutomationLearningUndo? priorUndo = null)
+    {
+        var label = AutomationLearningPolicy.DefaultSoftwareLabel(activity.ProcessName);
+        var result = await _store.LearnAutomationAsync(
+            new AutomationLearningRequest(
+                intent.ProjectId,
+                activity.ProcessName,
+                label,
+                titlePattern,
+                activity.Title),
+            cancellationToken);
+        _recognitionCandidates = await _store.GetRecognitionCandidatesAsync(cancellationToken);
+        await ReloadSoftwareSettingsCoreAsync(cancellationToken);
+
+        if (!result.IsBlocked && RunningEntry is { } runningEntry &&
+            runningEntry.ProjectId == intent.ProjectId)
+        {
+            var observedUtc = activity.ObservedUtc < runningEntry.StartUtc
+                ? runningEntry.StartUtc
+                : activity.ObservedUtc;
+            await TransitionSoftwareUsageAsync(
+                runningEntry.Id,
+                activity.ProcessName,
+                observedUtc,
+                notify: false,
+                cancellationToken);
+        }
+
+        DataChanged?.Invoke(this, EventArgs.Empty);
+        if (result.IsBlocked)
+        {
+            var message = result.BlockReason == AutomationLearningBlockReason.Excluded
+                ? $"{result.Software.Label} is excluded for {intent.ProjectName}; learning did not change that choice."
+                : $"{result.Software.Label} was previously removed; learning did not restore it.";
+            AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+                AutomationLearningNoticeKind.Blocked,
+                message,
+                ProjectId: intent.ProjectId,
+                ProjectName: intent.ProjectName,
+                ProcessName: result.Software.ProcessName,
+                SoftwareLabel: result.Software.Label));
+            return;
+        }
+
+        if (result.HasConflict)
+        {
+            var combinedUndo = CombineAutomationUndo(priorUndo, result.Undo);
+            _pendingAutomationTitleReview = new PendingAutomationTitleReview(
+                intent,
+                activity,
+                combinedUndo);
+            AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+                AutomationLearningNoticeKind.Conflict,
+                "That title phrase already recognizes another project. Choose a more specific phrase.",
+                activity.Title,
+                intent.ProjectId,
+                intent.ProjectName,
+                result.Software.ProcessName,
+                result.Software.Label));
+            return;
+        }
+
+        if (titlePattern is null)
+        {
+            var combinedUndo = CombineAutomationUndo(priorUndo, result.Undo);
+            _pendingAutomationTitleReview = new PendingAutomationTitleReview(
+                intent,
+                activity,
+                combinedUndo);
+            AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+                AutomationLearningNoticeKind.NeedsTitle,
+                $"{result.Software.Label} is now tracked for {intent.ProjectName}. Choose a stable title phrase for recognition.",
+                activity.Title,
+                intent.ProjectId,
+                intent.ProjectName,
+                result.Software.ProcessName,
+                result.Software.Label));
+            return;
+        }
+
+        _pendingAutomationTitleReview = null;
+        _lastAutomationLearningUndo = CombineAutomationUndo(priorUndo, result.Undo);
+        var noticeKind = result.HasConfigurationChange || priorUndo is not null
+            ? AutomationLearningNoticeKind.Learned
+            : AutomationLearningNoticeKind.Information;
+        var messageText = noticeKind == AutomationLearningNoticeKind.Learned
+            ? $"Learned: {result.Software.Label} + “{titlePattern}” → {intent.ProjectName}"
+            : $"{result.Software.Label} already recognizes {intent.ProjectName}.";
+        AutomationLearningNoticeChanged?.Invoke(this, new AutomationLearningNotice(
+            noticeKind,
+            messageText,
+            ProjectId: intent.ProjectId,
+            ProjectName: intent.ProjectName,
+            ProcessName: result.Software.ProcessName,
+            SoftwareLabel: result.Software.Label,
+            TitlePattern: titlePattern));
+    }
+
+    private static AutomationLearningUndo CombineAutomationUndo(
+        AutomationLearningUndo? first,
+        AutomationLearningUndo second)
+    {
+        if (first is null)
+        {
+            return second;
+        }
+
+        return new AutomationLearningUndo(
+            second.SoftwareId,
+            second.ProjectId,
+            second.RuleId ?? first.RuleId,
+            first.RemoveProjectSetting || second.RemoveProjectSetting,
+            first.RemoveRule || second.RemoveRule);
     }
 
     private async Task RecordInitialSoftwareAsync(
@@ -3326,6 +3697,11 @@ public sealed class AppController : IAsyncDisposable
         string? Label = null,
         DateTimeOffset? EndUtc = null,
         bool StartedWhileReviewVisible = false);
+
+    private sealed record PendingAutomationTitleReview(
+        AutomationLearningIntent Intent,
+        WindowActivity Activity,
+        AutomationLearningUndo Undo);
 }
 
 public sealed record EntryDetailsRequest(
@@ -3338,3 +3714,23 @@ public sealed record EntryDetailsRequest(
     bool AllowProjectSelection = false,
     string? Heading = null,
     TrackingSource Source = TrackingSource.Manual);
+
+public enum AutomationLearningNoticeKind
+{
+    Onboarding,
+    NeedsTitle,
+    Learned,
+    Conflict,
+    Blocked,
+    Information,
+}
+
+public sealed record AutomationLearningNotice(
+    AutomationLearningNoticeKind Kind,
+    string Message,
+    string? WindowTitle = null,
+    Guid? ProjectId = null,
+    string? ProjectName = null,
+    string? ProcessName = null,
+    string? SoftwareLabel = null,
+    string? TitlePattern = null);

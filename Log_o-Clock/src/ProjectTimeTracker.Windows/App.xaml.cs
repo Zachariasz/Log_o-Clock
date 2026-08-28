@@ -1149,6 +1149,7 @@ public partial class App : System.Windows.Application
                       string.Equals(smokeView, "TargetsContextMenu", StringComparison.OrdinalIgnoreCase) ||
                       string.Equals(smokeView, "Tasks", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "Tags", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(smokeView, "Automation", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "Software", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "Rules", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(smokeView, "RuleDialog", StringComparison.OrdinalIgnoreCase) ||
@@ -1176,11 +1177,11 @@ public partial class App : System.Windows.Application
                             ? 3
                             : string.Equals(smokeView, "Tags", StringComparison.OrdinalIgnoreCase)
                                 ? 4
-                                : string.Equals(smokeView, "Software", StringComparison.OrdinalIgnoreCase)
+                                : string.Equals(smokeView, "Automation", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(smokeView, "Software", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(smokeView, "Rules", StringComparison.OrdinalIgnoreCase) ||
+                                  string.Equals(smokeView, "RuleDialog", StringComparison.OrdinalIgnoreCase)
                                     ? 5
-                                    : string.Equals(smokeView, "Rules", StringComparison.OrdinalIgnoreCase) ||
-                                      string.Equals(smokeView, "RuleDialog", StringComparison.OrdinalIgnoreCase)
-                                    ? 6
                                     : 0;
                     _mainWindow.UpdateLayout();
                     if (string.Equals(smokeView, "SettingsIntegrations", StringComparison.OrdinalIgnoreCase) &&
@@ -1561,6 +1562,235 @@ public partial class App : System.Windows.Application
                     await _controller.SetCallsIdleProtectionEnabledAsync(true);
                     await _controller.SetVideoIdleProtectionEnabledAsync(true);
                     await _mainWindow.RefreshAllAsync();
+                }
+
+                if (string.Equals(
+                        Environment.GetEnvironmentVariable("PROJECT_TIME_TRACKER_SMOKE_VERIFY_AUTOMATION"),
+                        "true",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var client = await _store.AddClientAsync(
+                        $"Automation smoke client {Guid.NewGuid():N}",
+                        "#687582");
+                    var project = await _store.AddProjectAsync(
+                        client.Id,
+                        "Automation Phoenix",
+                        "#339CFF");
+                    var software = await _store.AddSoftwareAsync(
+                        "automation-blender.exe",
+                        "Automation Blender",
+                        project.Id,
+                        isExcluded: false,
+                        tagIds: []);
+                    _ = await _store.AddSoftwareAsync(
+                        "automation-private.exe",
+                        "Automation Private",
+                        project.Id,
+                        isExcluded: true,
+                        tagIds: []);
+                    _ = await _store.AddRuleAsync(
+                        project.Id,
+                        "Automation Phoenix scene",
+                        software.ProcessName);
+                    _ = await _store.AddRuleAsync(
+                        project.Id,
+                        "Automation Phoenix alternate",
+                        software.ProcessName);
+
+                    var frozenProject = await _store.AddProjectAsync(
+                        client.Id,
+                        "Frozen automation",
+                        "#40C977");
+                    _ = await _store.AddSoftwareAsync(
+                        "automation-frozen.exe",
+                        "Frozen automation app",
+                        frozenProject.Id,
+                        isExcluded: false,
+                        tagIds: []);
+                    await _store.SetProjectFrozenAsync(frozenProject.Id, true);
+
+                    var historical = await _store.LearnAutomationAsync(
+                        new AutomationLearningRequest(
+                            project.Id,
+                            "automation-history.exe",
+                            "Automation history",
+                            "Automation history"));
+                    var now = DateTimeOffset.UtcNow;
+                    await _store.AddManualEntryAsync(
+                        project.Id,
+                        null,
+                        "Automation history-only entry",
+                        now.AddMinutes(-10),
+                        now);
+                    var historyEntry = (await _store.GetEntriesAsync(
+                            now.AddMinutes(-11),
+                            now.AddMinutes(1)))
+                        .Single(entry => string.Equals(
+                            entry.Description,
+                            "Automation history-only entry",
+                            StringComparison.Ordinal));
+                    if (!await _store.RecordSoftwareUsageAsync(
+                            historyEntry.Id,
+                            historical.Software.ProcessName))
+                    {
+                        throw new InvalidOperationException(
+                            "The Automation smoke could not seed history-only software.");
+                    }
+                    await _store.UndoLearnedAutomationAsync(historical.Undo);
+
+                    AutomationLearningNotice? learningNotice = null;
+                    void CaptureLearningNotice(object? sender, AutomationLearningNotice? notice)
+                    {
+                        _ = sender;
+                        learningNotice = notice;
+                    }
+
+                    _controller.AutomationLearningNoticeChanged += CaptureLearningNotice;
+                    try
+                    {
+                        var learningStartedUtc = _controller.UtcNow;
+                        var running = await _controller.StartTimerAsync(
+                            project.Id,
+                            TrackingSource.Manual,
+                            showDetails: false,
+                            initialDescription: "Automation learning smoke");
+                        if (learningNotice?.Kind != AutomationLearningNoticeKind.Onboarding ||
+                            _controller.AutomationLearningEnabled)
+                        {
+                            throw new InvalidOperationException(
+                                "The first eligible manual action did not show one-time Automation onboarding.");
+                        }
+
+                        await _controller.SetAutomationLearningEnabledAsync(true);
+                        await _controller.ArmAutomationLearningForPreviewAsync(project.Id);
+                        await _controller.ApplyAutomationLearningActivityForPreviewAsync(
+                            new WindowActivity(
+                                101,
+                                "Automation Phoenix - Learned scene",
+                                "automation-learned.exe",
+                                _controller.UtcNow));
+                        var learnedSetting = (await _store.GetProjectSoftwareAsync(project.Id))
+                            .SingleOrDefault(setting => string.Equals(
+                                setting.Software.ProcessName,
+                                "automation-learned",
+                                StringComparison.OrdinalIgnoreCase));
+                        var learnedRule = (await _store.GetRulesAsync(project.Id))
+                            .SingleOrDefault(rule => string.Equals(
+                                rule.ProcessName,
+                                "automation-learned",
+                                StringComparison.OrdinalIgnoreCase));
+                        var learnedEntry = (await _store.GetEntriesAsync(
+                                learningStartedUtc.AddMinutes(-1),
+                                _controller.UtcNow.AddMinutes(1)))
+                            .Single(entry => entry.Id == running.Id);
+                        if (learningNotice?.Kind != AutomationLearningNoticeKind.Learned ||
+                            learnedSetting is null ||
+                            learnedRule is null ||
+                            learnedRule.TitlePattern != project.Name ||
+                            !learnedEntry.SoftwareLabels.Contains(
+                                learnedSetting.Software.Label,
+                                StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException(
+                                "An eligible manual action did not learn process-plus-title Automation and start software tracking. " +
+                                $"Notice={learningNotice?.Kind}; Setting={learnedSetting is not null}; " +
+                                $"Rule={learnedRule?.TitlePattern ?? "<none>"}; Project={project.Name}; " +
+                                $"Labels={string.Join(",", learnedEntry.SoftwareLabels)}.");
+                        }
+
+                        await _controller.UndoLastAutomationLearningAsync();
+                        if ((await _store.GetProjectSoftwareAsync(project.Id)).Any(setting =>
+                                string.Equals(
+                                    setting.Software.ProcessName,
+                                    "automation-learned",
+                                    StringComparison.OrdinalIgnoreCase)) ||
+                            (await _store.GetRulesAsync(project.Id)).Any(rule =>
+                                string.Equals(
+                                    rule.ProcessName,
+                                    "automation-learned",
+                                    StringComparison.OrdinalIgnoreCase)) ||
+                            !(await _store.GetEntriesAsync(
+                                    learningStartedUtc.AddMinutes(-1),
+                                    _controller.UtcNow.AddMinutes(1)))
+                                .Single(entry => entry.Id == running.Id)
+                                .SoftwareLabels.Contains(
+                                    learnedSetting.Software.Label,
+                                    StringComparison.Ordinal))
+                        {
+                            throw new InvalidOperationException(
+                                "Automation Undo did not remove only learned configuration while preserving history.");
+                        }
+
+                        await _controller.StopTimerAsync();
+                        _detailsWindow?.CloseWithoutSaving();
+                        _ = await _controller.StartTimerAsync(
+                            project.Id,
+                            TrackingSource.WindowReminder,
+                            showDetails: false,
+                            initialDescription: "Recognition must not learn");
+                        await _controller.ApplyAutomationLearningActivityForPreviewAsync(
+                            new WindowActivity(
+                                102,
+                                "Sensitive unknown foreground title",
+                                "automation-unknown.exe",
+                                _controller.UtcNow));
+                        if ((await _store.GetSoftwareAsync()).Any(item => string.Equals(
+                                item.ProcessName,
+                                "automation-unknown",
+                                StringComparison.OrdinalIgnoreCase)))
+                        {
+                            throw new InvalidOperationException(
+                                "Automatic recognition or foreground observation created Automation configuration.");
+                        }
+
+                        await _controller.StopTimerAsync();
+                        _detailsWindow?.CloseWithoutSaving();
+                    }
+                    finally
+                    {
+                        _controller.AutomationLearningNoticeChanged -= CaptureLearningNotice;
+                    }
+
+                    var automationRules = await _store.GetRulesAsync();
+                    var automationSetting = (await _store.GetProjectSoftwareAsync(project.Id))
+                        .Single(setting => setting.Software.Id == software.Id);
+                    var automationEditor = new SoftwareSettingsWindow(
+                        automationSetting,
+                        await _store.GetTagsAsync(),
+                        await _store.GetProjectOptionsAsync(),
+                        project.Id,
+                        () => _controller.CurrentActivity,
+                        availableRules: automationRules)
+                    {
+                        Owner = _mainWindow,
+                    };
+                    automationEditor.VerifyAdvancedRulesForPreview(
+                        ["Automation Phoenix scene", "Automation Phoenix alternate"],
+                        ["Automation Phoenix"]);
+                    automationEditor.Close();
+
+                    var advancedRuleEditor = new SoftwareSettingsWindow(
+                        setting: null,
+                        availableTags: await _store.GetTagsAsync(),
+                        projects: await _store.GetProjectOptionsAsync(),
+                        selectedProjectId: project.Id,
+                        captureCurrentActivity: () => _controller.CurrentActivity,
+                        titlePattern: "Automation Phoenix scene",
+                        ruleOnly: true,
+                        initialProcessName: software.ProcessName)
+                    {
+                        Owner = _mainWindow,
+                    };
+                    advancedRuleEditor.VerifyRuleOnlyModeForPreview();
+                    advancedRuleEditor.Close();
+
+                    await _controller.ReloadSoftwareSettingsAsync();
+                    await _controller.ReloadRecognitionAsync();
+                    await _mainWindow.RefreshAllAsync();
+                    _mainWindow.VerifyAutomationForPreview(
+                        project.Id,
+                        software.Id,
+                        software.ProcessName);
                 }
 
                 if (string.Equals(
@@ -4634,13 +4864,15 @@ public partial class App : System.Windows.Application
                     else if (string.Equals(smokeView, "RuleDialog", StringComparison.OrdinalIgnoreCase))
                     {
                         var projects = await _store.GetProjectOptionsAsync();
-                        var dialog = new RuleDialog(
-                            projects,
-                            projects.FirstOrDefault()?.ProjectId,
-                            "Creature animation",
-                            "motionbuilder",
-                            () => _controller.CurrentActivity,
-                            isEditing: false)
+                        var dialog = new SoftwareSettingsWindow(
+                            setting: null,
+                            availableTags: await _store.GetTagsAsync(),
+                            projects: projects,
+                            selectedProjectId: projects.FirstOrDefault()?.ProjectId,
+                            captureCurrentActivity: () => _controller.CurrentActivity,
+                            titlePattern: "Creature animation",
+                            ruleOnly: true,
+                            initialProcessName: "motionbuilder")
                         {
                             Owner = _mainWindow,
                         };

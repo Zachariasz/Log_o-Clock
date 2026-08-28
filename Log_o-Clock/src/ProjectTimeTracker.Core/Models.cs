@@ -347,6 +347,45 @@ public sealed record RecognitionRule(
     string? ProcessName,
     bool IsEnabled = true);
 
+public sealed record AutomationLearningRequest(
+    Guid ProjectId,
+    string ProcessName,
+    string Label,
+    string? TitlePattern,
+    string? ObservedWindowTitle = null);
+
+public sealed record AutomationLearningUndo(
+    Guid SoftwareId,
+    Guid ProjectId,
+    Guid? RuleId,
+    bool RemoveProjectSetting,
+    bool RemoveRule);
+
+public enum AutomationLearningBlockReason
+{
+    None,
+    Excluded,
+    RemovedSoftware,
+}
+
+public sealed record AutomationLearningResult(
+    SoftwareDefinition Software,
+    RecognitionRule? Rule,
+    AutomationLearningUndo Undo,
+    bool CreatedSoftware,
+    bool CreatedProjectSetting,
+    bool CreatedRule,
+    AutomationLearningBlockReason BlockReason,
+    IReadOnlyList<Guid> ConflictingProjectIds)
+{
+    public bool HasConfigurationChange =>
+        CreatedSoftware || CreatedProjectSetting || CreatedRule;
+
+    public bool HasConflict => ConflictingProjectIds.Count > 0;
+
+    public bool IsBlocked => BlockReason != AutomationLearningBlockReason.None;
+}
+
 public sealed record ProjectBulkEdit(
     bool UpdateClient = false,
     Guid? ClientId = null,
@@ -743,6 +782,18 @@ public static class AutomaticRecognitionSettings
 
     public static bool IsValidGraceMinutes(int minutes) =>
         minutes is >= MinimumAllowedMinutes and <= MaximumAllowedMinutes;
+}
+
+public static class AutomationLearningSettings
+{
+    public const string EnabledKey = "automation.learning.enabled";
+    public const string OnboardingSeenKey = "automation.learning.onboarding-seen";
+
+    public static bool ParseEnabled(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+
+    public static bool ParseOnboardingSeen(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }
 
 public enum BreakReminderPlacement
