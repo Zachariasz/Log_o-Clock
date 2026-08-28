@@ -2385,10 +2385,11 @@ public sealed class AppController : IAsyncDisposable
                 initialVisit.ProjectId!.Value,
                 taskId,
                 null,
-                TrackingSource.WindowReminder,
+                TrackingSource.AutomaticRecognition,
                 initialVisit.StartedUtc,
                 TimeSpan.FromMinutes(RecentEntryResumeMaximumGapMinutes),
-                cancellationToken);
+                cancellationToken,
+                queueAutomaticTagging: AutomaticTaggingEnabled);
             RunningEntry = startResult.Entry;
             ResetExcludedSoftwareTracking();
             RunningExcludedSeconds = startResult.ResumedPreviousEntry
@@ -2429,8 +2430,9 @@ public sealed class AppController : IAsyncDisposable
                     nextVisit.ProjectId!.Value,
                     taskIdForNext,
                     Description: null,
-                    Source: TrackingSource.WindowReminder,
-                    StartUtc: nextVisit.StartedUtc),
+                    Source: TrackingSource.AutomaticRecognition,
+                    StartUtc: nextVisit.StartedUtc,
+                    QueueAutomaticTagging: AutomaticTaggingEnabled),
             cancellationToken);
 
         ResetExcludedSoftwareTracking();

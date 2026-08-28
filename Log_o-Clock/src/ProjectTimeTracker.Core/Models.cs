@@ -463,6 +463,69 @@ public enum TrackingSource
 {
     Manual = 0,
     WindowReminder = 1,
+    AutomaticRecognition = 2,
+}
+
+public enum AutomaticTagQueueState
+{
+    Pending = 0,
+    Suggested = 1,
+}
+
+public sealed record AutomaticTagConcept(
+    Guid TagId,
+    string TagName,
+    string MatchText,
+    string? BuiltInKey,
+    DateTimeOffset ModifiedUtc);
+
+public sealed record TaskAutomaticTagPreference(
+    Guid TaskId,
+    Guid? TagId,
+    string? TagName,
+    bool IsSuppressed,
+    DateTimeOffset ModifiedUtc);
+
+public sealed record AutomaticTaggingQueueItem(
+    Guid EntryId,
+    Guid ProjectId,
+    Guid TaskId,
+    string TaskName,
+    string? Description,
+    DateTimeOffset StartUtc,
+    DateTimeOffset? EndUtc,
+    long ExcludedSeconds,
+    AutomaticTagQueueState State,
+    Guid? ProposedTagId,
+    string? ProposedTagName,
+    string? ProposedBuiltInKey,
+    double? Confidence,
+    string? InputHash,
+    string ClassifierVersion,
+    DateTimeOffset CreatedUtc)
+{
+    public long NetDurationSeconds(DateTimeOffset nowUtc) =>
+        Math.Max(0, (long)((EndUtc ?? nowUtc) - StartUtc).TotalSeconds - ExcludedSeconds);
+}
+
+public enum AutomaticTagApplyResult
+{
+    Applied,
+    AlreadyTagged,
+    MissingEntry,
+    NeedsReview,
+}
+
+public static class AutomaticTaggingSettings
+{
+    public const string EnabledKey = "recognition.automatic-tagging.enabled";
+    public const string ModelAlias = "qwen3-0.6b-embedding";
+    public const string ClassifierVersion = "automatic-tags-v1";
+    public const int MinimumEntrySeconds = 60;
+    public const int MaximumPendingDays = 30;
+
+    public static bool ParseEnabled(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record TimeEntry(
@@ -492,7 +555,8 @@ public sealed record TimerStartRequest(
     Guid? TaskId,
     string? Description,
     TrackingSource Source,
-    DateTimeOffset StartUtc);
+    DateTimeOffset StartUtc,
+    bool QueueAutomaticTagging = false);
 
 public sealed record TimerTransitionResult(
     TimeEntry? StoppedEntry,

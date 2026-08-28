@@ -218,6 +218,11 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task<TrelloConnection?> GetTrelloConnectionAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TrelloBoardMapping>> GetTrelloBoardMappingsAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<ExternalTaskLink>> GetExternalTaskLinksAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AutomaticTagConcept>> GetAutomaticTagConceptsAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlySet<string>> GetAutomaticTagConceptSuppressionsAsync(CancellationToken cancellationToken = default);
+    Task<TaskAutomaticTagPreference?> GetTaskAutomaticTagPreferenceAsync(Guid taskId, CancellationToken cancellationToken = default);
+    Task<AutomaticTagHistoryEvidence?> GetAutomaticTagHistoryEvidenceAsync(Guid taskId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<AutomaticTaggingQueueItem>> GetAutomaticTaggingQueueAsync(AutomaticTagQueueState? state = null, int limit = 100, CancellationToken cancellationToken = default);
 
     Task<Client> AddClientAsync(string name, string color, CancellationToken cancellationToken = default);
     Task<Project> AddProjectAsync(Guid clientId, string name, string color, CancellationToken cancellationToken = default);
@@ -297,6 +302,12 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
     Task RemoveTrelloBoardMappingAsync(Guid mappingId, CancellationToken cancellationToken = default);
     Task<TrelloSyncResult> ReconcileTrelloBoardAsync(Guid mappingId, IReadOnlyList<TrelloCard> cards, DateTimeOffset completedUtc, CancellationToken cancellationToken = default);
     Task SuppressExternalTaskAsync(Guid taskId, CancellationToken cancellationToken = default);
+    Task SetTaskAutomaticTagPreferenceAsync(Guid taskId, Guid? tagId, bool isSuppressed, DateTimeOffset modifiedUtc, CancellationToken cancellationToken = default);
+    Task SuppressAutomaticTagConceptAsync(string builtInKey, DateTimeOffset modifiedUtc, CancellationToken cancellationToken = default);
+    Task SaveAutomaticTagSuggestionAsync(Guid entryId, AutomaticTagPolicyDecision suggestion, string inputHash, CancellationToken cancellationToken = default);
+    Task<AutomaticTagApplyResult> ApplyAutomaticTagAsync(Guid entryId, AutomaticTagPolicyDecision decision, bool rememberForTask = false, CancellationToken cancellationToken = default);
+    Task DismissAutomaticTagSuggestionAsync(Guid entryId, bool suppressTask, DateTimeOffset modifiedUtc, CancellationToken cancellationToken = default);
+    Task DeleteExpiredAutomaticTaggingQueueAsync(DateTimeOffset cutoffUtc, CancellationToken cancellationToken = default);
 
     Task<TimeEntry?> GetRunningEntryAsync(CancellationToken cancellationToken = default);
     Task<TimeEntry?> GetTimeEntryAsync(Guid entryId, CancellationToken cancellationToken = default);
@@ -309,7 +320,8 @@ public interface ITrackerStore : IAsyncDisposable, IUpdateSettingsStore
         TrackingSource source,
         DateTimeOffset nowUtc,
         TimeSpan maximumGap,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool queueAutomaticTagging = false);
     Task<TimeEntry> SplitRunningTimerAsync(Guid entryId, Guid? taskId, string? description, DateTimeOffset nowUtc, CancellationToken cancellationToken = default, bool? isCall = null);
     Task<TimeEntry> SwitchRunningTimerAsync(Guid entryId, Guid projectId, Guid? taskId, string? description, TrackingSource source, DateTimeOffset nowUtc, CancellationToken cancellationToken = default);
     Task<TimerTransitionResult> TransitionRunningTimerAsync(Guid entryId, DateTimeOffset endUtc, TimerStartRequest? nextStart, CancellationToken cancellationToken = default);

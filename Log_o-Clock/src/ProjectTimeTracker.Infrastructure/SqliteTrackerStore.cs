@@ -6,7 +6,7 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed partial class SqliteTrackerStore : ITrackerStore
 {
-    private const int SchemaVersion = 29;
+    private const int SchemaVersion = 30;
     private static readonly TimeSpan MinimumEntryDuration = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly TimeZoneInfo _monthlyLogTimeZone;
@@ -230,6 +230,15 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                     cancellationToken) == 0)
             {
                 await ExecuteAsync(connection, MigrationV29Sql, cancellationToken);
+            }
+
+            if (version < 30 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'AutomaticTaggingQueue';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV30Sql, cancellationToken);
             }
 
             await ExecuteAsync(connection, SchemaV21IndexesSql, cancellationToken);
@@ -2414,6 +2423,7 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         await using var connection = await OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
         string? tagName;
+        string? automaticBuiltInKey = null;
         await using (var command = connection.CreateCommand())
         {
             command.Transaction = transaction;
@@ -2426,6 +2436,15 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         {
             transaction.Commit();
             return;
+        }
+
+        await using (var conceptCommand = connection.CreateCommand())
+        {
+            conceptCommand.Transaction = transaction;
+            conceptCommand.CommandText =
+                "SELECT BuiltInKey FROM AutomaticTagConcepts WHERE TagId = $id LIMIT 1;";
+            conceptCommand.Parameters.AddWithValue("$id", tagId.ToString("D"));
+            automaticBuiltInKey = (string?)await conceptCommand.ExecuteScalarAsync(cancellationToken);
         }
 
         var entries = new List<(Guid Id, string Description)>();
@@ -2442,6 +2461,20 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         }
 
         var modifiedUtc = Format(DateTimeOffset.UtcNow);
+        if (!string.IsNullOrWhiteSpace(automaticBuiltInKey))
+        {
+            await ExecuteInTransactionAsync(
+                connection,
+                transaction,
+                """
+                INSERT INTO AutomaticTagConceptSuppressions (BuiltInKey, ModifiedUtc)
+                VALUES ($key, $modified)
+                ON CONFLICT(BuiltInKey) DO UPDATE SET ModifiedUtc = excluded.ModifiedUtc;
+                """,
+                cancellationToken,
+                ("$key", automaticBuiltInKey),
+                ("$modified", modifiedUtc));
+        }
         foreach (var entry in entries)
         {
             await ExecuteInTransactionAsync(
@@ -3346,7 +3379,8 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         TrackingSource source,
         DateTimeOffset nowUtc,
         TimeSpan maximumGap,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool queueAutomaticTagging = false)
     {
         if (maximumGap < TimeSpan.Zero)
         {
@@ -3434,6 +3468,14 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                 ("$pending", pending ? 1 : 0),
                 ("$id", previousEntry.Id.ToString("D")),
                 ("$previousEnd", Format(previousEntry.EndUtc!.Value)));
+            if (queueAutomaticTagging && taskId is not null)
+            {
+                await EnqueueAutomaticTaggingAsync(
+                    connection,
+                    transaction,
+                    previousEntry.Id,
+                    cancellationToken);
+            }
             await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
             transaction.Commit();
             await connection.CloseAsync();
@@ -3473,6 +3515,10 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             description,
             projectId,
             cancellationToken);
+        if (queueAutomaticTagging && taskId is not null)
+        {
+            await EnqueueAutomaticTaggingAsync(connection, transaction, id, cancellationToken);
+        }
         await DeleteUnusedNotificationTasksAsync(connection, transaction, cancellationToken);
 
         transaction.Commit();
@@ -3825,6 +3871,14 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                 ("$pending", nextPending ? 1 : 0),
                 ("$source", (int)normalizedNextStart.Source),
                 ("$call", running.IsCall ? 1 : 0));
+            if (normalizedNextStart.QueueAutomaticTagging && normalizedNextStart.TaskId is not null)
+            {
+                await EnqueueAutomaticTaggingAsync(
+                    connection,
+                    transaction,
+                    nextEntryId,
+                    cancellationToken);
+            }
             nextEntry = new TimeEntry(
                 nextEntryId,
                 normalizedNextStart.ProjectId,
@@ -6240,6 +6294,29 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         );
         CREATE INDEX IF NOT EXISTS IX_ProjectTags_ProjectId ON ProjectTags (ProjectId);
 
+        CREATE TABLE IF NOT EXISTS AutomaticTagConcepts (
+            TagId TEXT PRIMARY KEY REFERENCES Tags(Id) ON DELETE CASCADE,
+            BuiltInKey TEXT NULL COLLATE NOCASE UNIQUE,
+            MatchText TEXT NOT NULL,
+            ModifiedUtc TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS TaskAutomaticTagPreferences (
+            TaskId TEXT PRIMARY KEY REFERENCES SavedTasks(Id) ON DELETE CASCADE,
+            TagId TEXT NULL REFERENCES Tags(Id) ON DELETE SET NULL,
+            IsSuppressed INTEGER NOT NULL CHECK (IsSuppressed IN (0, 1)),
+            ModifiedUtc TEXT NOT NULL,
+            CHECK ((IsSuppressed = 1 AND TagId IS NULL) OR
+                   (IsSuppressed = 0 AND TagId IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS IX_TaskAutomaticTagPreferences_TagId
+            ON TaskAutomaticTagPreferences (TagId);
+
+        CREATE TABLE IF NOT EXISTS AutomaticTagConceptSuppressions (
+            BuiltInKey TEXT PRIMARY KEY COLLATE NOCASE,
+            ModifiedUtc TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS Software (
             Id TEXT PRIMARY KEY,
             ProcessName TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -6308,6 +6385,20 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             ON TimeEntries ((1)) WHERE EndUtc IS NULL;
         CREATE INDEX IF NOT EXISTS IX_TimeEntries_StartUtc ON TimeEntries (StartUtc);
         CREATE INDEX IF NOT EXISTS IX_TimeEntries_ProjectId ON TimeEntries (ProjectId);
+
+        CREATE TABLE IF NOT EXISTS AutomaticTaggingQueue (
+            EntryId TEXT PRIMARY KEY REFERENCES TimeEntries(Id) ON DELETE CASCADE,
+            State INTEGER NOT NULL DEFAULT 0 CHECK (State IN (0, 1)),
+            ProposedTagId TEXT NULL REFERENCES Tags(Id) ON DELETE SET NULL,
+            ProposedTagName TEXT NULL,
+            ProposedBuiltInKey TEXT NULL,
+            Confidence REAL NULL CHECK (Confidence IS NULL OR (Confidence >= 0 AND Confidence <= 1)),
+            InputHash TEXT NULL,
+            ClassifierVersion TEXT NOT NULL,
+            CreatedUtc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS IX_AutomaticTaggingQueue_StateCreatedUtc
+            ON AutomaticTaggingQueue (State, CreatedUtc);
 
         CREATE TABLE IF NOT EXISTS GoogleSheetsEntryDeletions (
             EntryId TEXT PRIMARY KEY,
@@ -6635,6 +6726,45 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             FROM TimeEntrySoftwareIntervals i
             WHERE i.TimeEntryId = TimeEntrySoftware.TimeEntryId
         );
+        """;
+
+    private const string MigrationV30Sql = """
+        CREATE TABLE IF NOT EXISTS AutomaticTagConcepts (
+            TagId TEXT PRIMARY KEY REFERENCES Tags(Id) ON DELETE CASCADE,
+            BuiltInKey TEXT NULL COLLATE NOCASE UNIQUE,
+            MatchText TEXT NOT NULL,
+            ModifiedUtc TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS TaskAutomaticTagPreferences (
+            TaskId TEXT PRIMARY KEY REFERENCES SavedTasks(Id) ON DELETE CASCADE,
+            TagId TEXT NULL REFERENCES Tags(Id) ON DELETE SET NULL,
+            IsSuppressed INTEGER NOT NULL CHECK (IsSuppressed IN (0, 1)),
+            ModifiedUtc TEXT NOT NULL,
+            CHECK ((IsSuppressed = 1 AND TagId IS NULL) OR
+                   (IsSuppressed = 0 AND TagId IS NOT NULL))
+        );
+        CREATE INDEX IF NOT EXISTS IX_TaskAutomaticTagPreferences_TagId
+            ON TaskAutomaticTagPreferences (TagId);
+
+        CREATE TABLE IF NOT EXISTS AutomaticTagConceptSuppressions (
+            BuiltInKey TEXT PRIMARY KEY COLLATE NOCASE,
+            ModifiedUtc TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS AutomaticTaggingQueue (
+            EntryId TEXT PRIMARY KEY REFERENCES TimeEntries(Id) ON DELETE CASCADE,
+            State INTEGER NOT NULL DEFAULT 0 CHECK (State IN (0, 1)),
+            ProposedTagId TEXT NULL REFERENCES Tags(Id) ON DELETE SET NULL,
+            ProposedTagName TEXT NULL,
+            ProposedBuiltInKey TEXT NULL,
+            Confidence REAL NULL CHECK (Confidence IS NULL OR (Confidence >= 0 AND Confidence <= 1)),
+            InputHash TEXT NULL,
+            ClassifierVersion TEXT NOT NULL,
+            CreatedUtc TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS IX_AutomaticTaggingQueue_StateCreatedUtc
+            ON AutomaticTaggingQueue (State, CreatedUtc);
         """;
 
     private const string SchemaV21IndexesSql = """
