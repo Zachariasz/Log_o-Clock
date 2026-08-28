@@ -1908,9 +1908,22 @@
                                       HorizontalScrollBarVisibility="Disabled"
                                       CanContentScroll="False">
                         <StackPanel>
-                        <Border x:Name="ReportChartCard" Height="276" Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
+                        <Border x:Name="ReportChartCard" Height="316" Background="{StaticResource SurfaceEditorBrush}" BorderBrush="{StaticResource BorderLightBrush}"
                                 BorderThickness="1" CornerRadius="{StaticResource Radius.Card}" Padding="12">
-                            <TabControl x:Name="ReportChartTabs">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <CheckBox x:Name="ReportBossStatsToggle"
+                                          Content="Stats for the Boss"
+                                          Style="{StaticResource ToggleSwitchStyle}"
+                                          Margin="4,0,4,8"
+                                          ToolTip="Include excluded idle intervals up to the configured short-idle limit"
+                                          AutomationProperties.Name="Stats for the Boss, include short idle"
+                                          Checked="ReportBossStatsToggle_Changed"
+                                          Unchecked="ReportBossStatsToggle_Changed" />
+                            <TabControl x:Name="ReportChartTabs" Grid.Row="1">
                                 <TabItem Header="Projects">
                                     <Grid Margin="4,4,4,0">
                                         <Grid.RowDefinitions>
@@ -1949,7 +1962,7 @@
                                                                 <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
                                                                         Margin="0,3,7,0" VerticalAlignment="Top" />
                                                                 <StackPanel Grid.Column="1">
-                                                                    <TextBlock Text="{Binding Project}" FontWeight="SemiBold"
+                                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
                                                                                TextTrimming="CharacterEllipsis" />
                                                                     <TextBlock Text="{Binding LegendDetail}" Foreground="{StaticResource MutedBrush}"
                                                                                FontSize="11" />
@@ -1983,7 +1996,7 @@
                                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                                     <TextBlock x:Name="ReportClientDonutTotalHours" Text="0:00 h" FontSize="21"
                                                                FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                                    <TextBlock Text="month" Foreground="{StaticResource MutedBrush}"
+                                                    <TextBlock Text="total" Foreground="{StaticResource MutedBrush}"
                                                                FontSize="11" HorizontalAlignment="Center" />
                                                 </StackPanel>
                                             </Grid>
@@ -2000,7 +2013,7 @@
                                                                 <Border Width="9" Height="9" CornerRadius="5" Background="{Binding Color}"
                                                                         Margin="0,3,7,0" VerticalAlignment="Top" />
                                                                 <StackPanel Grid.Column="1">
-                                                                    <TextBlock Text="{Binding Client}" FontWeight="SemiBold"
+                                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold"
                                                                                TextTrimming="CharacterEllipsis" />
                                                                     <TextBlock Text="{Binding LegendDetail}" Foreground="{StaticResource MutedBrush}"
                                                                                FontSize="11" />
@@ -2034,7 +2047,7 @@
                                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                                                     <TextBlock x:Name="ReportSoftwareDonutTotalHours" Text="0:00 h" FontSize="21"
                                                                FontWeight="SemiBold" HorizontalAlignment="Center" />
-                                                    <TextBlock Text="tracked" Foreground="{StaticResource MutedBrush}"
+                                                    <TextBlock Text="total" Foreground="{StaticResource MutedBrush}"
                                                                FontSize="11" HorizontalAlignment="Center" />
                                                 </StackPanel>
                                             </Grid>
@@ -2065,8 +2078,9 @@
                                     </Grid>
                                 </TabItem>
                             </TabControl>
+                            </Grid>
                         </Border>
-                        <Border x:Name="ReportInclusiveChartCard" Height="246" Margin="0,12,0,0"
+                        <Border x:Name="ReportInclusiveChartCard" Height="246" Margin="0,12,0,0" Visibility="Collapsed"
                                 Background="{StaticResource SurfaceEditorBrush}"
                                 BorderBrush="{StaticResource BorderLightBrush}"
                                 BorderThickness="1" CornerRadius="{StaticResource Radius.Card}" Padding="16,12">

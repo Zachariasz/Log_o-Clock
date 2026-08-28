@@ -27,7 +27,7 @@ With the bundled SDK:
   -c Release --no-restore -m:1 --disable-build-servers
 ```
 
-At this documentation snapshot, the complete suite resolves to **338 passing tests**.
+At this documentation snapshot, the complete suite resolves to **351 passing tests**.
 
 ## Automated test map
 

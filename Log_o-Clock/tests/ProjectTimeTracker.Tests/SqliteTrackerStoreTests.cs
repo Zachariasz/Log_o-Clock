@@ -141,15 +141,24 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
             report,
             row =>
             {
+                Assert.Null(row.SoftwareId);
+                Assert.Equal("Other software", row.Label);
+                Assert.Equal(30 * 60, row.DurationSeconds);
+                Assert.Equal(30 * 60, row.DurationWithShortIdleSeconds);
+            },
+            row =>
+            {
                 Assert.Equal(blender.Id, row.SoftwareId);
                 Assert.Equal("Blender", row.Label);
                 Assert.Equal(25 * 60, row.DurationSeconds);
+                Assert.Equal(30 * 60, row.DurationWithShortIdleSeconds);
             },
             row =>
             {
                 Assert.Equal(maya.Id, row.SoftwareId);
                 Assert.Equal("Maya", row.Label);
                 Assert.Equal(25 * 60, row.DurationSeconds);
+                Assert.Equal(30 * 60, row.DurationWithShortIdleSeconds);
             });
         Assert.Empty(await _store.GetSoftwareUsageReportAsync(
             start,
@@ -158,7 +167,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LegacySoftwareAssociationsDoNotInventUsageDurations()
+    public async Task AssociationWithoutIntervalsRemainsAnonymousInSoftwareReport()
     {
         var client = await _store.AddClientAsync("Legacy software client", "#112233");
         var project = await _store.AddProjectAsync(client.Id, "Legacy software project", "#223344");
@@ -168,7 +177,13 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         var entry = Assert.Single(await _store.GetEntriesAsync(start, start.AddHours(1)));
 
         Assert.True(await _store.RecordSoftwareUsageAsync(entry.Id, software.ProcessName));
-        Assert.Empty(await _store.GetSoftwareUsageReportAsync(start, start.AddHours(1), new ReportFilter()));
+        var report = Assert.Single(await _store.GetSoftwareUsageReportAsync(
+            start,
+            start.AddHours(1),
+            new ReportFilter()));
+        Assert.Null(report.SoftwareId);
+        Assert.Equal("Other software", report.Label);
+        Assert.Equal(3600, report.DurationSeconds);
     }
 
     [Fact]
@@ -201,8 +216,55 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'TimeEntrySoftwareIntervals';";
         Assert.Equal(1L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         verifyCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(28L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Equal(29L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         Assert.Single(Directory.GetFiles(directory, "TimeTracker.db.backup-v27-*"));
+    }
+
+    [Fact]
+    public async Task VersionTwentyEightUpgradeSplitsLegacySoftwareTimeEqually()
+    {
+        var directory = Path.Combine(_directory, "schema-29-legacy-software");
+        var database = Path.Combine(directory, "TimeTracker.db");
+        var start = new DateTimeOffset(2026, 8, 25, 8, 0, 0, TimeSpan.Zero);
+        Guid firstSoftwareId;
+        Guid secondSoftwareId;
+        await using (var oldStore = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc))
+        {
+            await oldStore.InitializeAsync();
+            var client = await oldStore.AddClientAsync("Legacy allocation client", "#112233");
+            var project = await oldStore.AddProjectAsync(client.Id, "Legacy allocation project", "#223344");
+            var first = await oldStore.AddSoftwareAsync("legacy-a.exe", "Legacy A", project.Id, false, []);
+            var second = await oldStore.AddSoftwareAsync("legacy-b.exe", "Legacy B", project.Id, false, []);
+            firstSoftwareId = first.Id;
+            secondSoftwareId = second.Id;
+            await oldStore.AddManualEntryAsync(project.Id, null, null, start, start.AddHours(1));
+            var entry = Assert.Single(await oldStore.GetEntriesAsync(start, start.AddHours(1)));
+            Assert.True(await oldStore.RecordSoftwareUsageAsync(entry.Id, first.ProcessName));
+            Assert.True(await oldStore.RecordSoftwareUsageAsync(entry.Id, second.ProcessName));
+        }
+
+        await using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "ALTER TABLE TimeEntrySoftware DROP COLUMN LegacyAllocationEndUtc; PRAGMA user_version = 28;";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await using (var upgraded = new SqliteTrackerStore(database, directory, TimeZoneInfo.Utc))
+        {
+            await upgraded.InitializeAsync();
+            var report = await upgraded.GetSoftwareUsageReportAsync(start, start.AddHours(1), new ReportFilter());
+            Assert.Equal(2, report.Count);
+            Assert.All(report, row =>
+            {
+                Assert.Contains(row.SoftwareId, new Guid?[] { firstSoftwareId, secondSoftwareId });
+                Assert.Equal(30 * 60, row.DurationSeconds);
+                Assert.Equal(30 * 60, row.DurationWithShortIdleSeconds);
+            });
+        }
+
+        Assert.Single(Directory.GetFiles(directory, "TimeTracker.db.backup-v28-*"));
     }
 
     [Fact]
@@ -425,12 +487,14 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.DoesNotContain(
             await _store.GetRulesAsync(project.Id),
             rule => rule.Id == learned.Rule?.Id);
-        var report = Assert.Single(await _store.GetSoftwareUsageReportAsync(
+        var report = await _store.GetSoftwareUsageReportAsync(
             start,
             start.AddMinutes(20),
-            new ReportFilter(ProjectId: project.Id)));
-        Assert.Equal(learned.Software.Id, report.SoftwareId);
-        Assert.Equal(10 * 60, report.DurationSeconds);
+            new ReportFilter(ProjectId: project.Id));
+        var blender = Assert.Single(report, row => row.SoftwareId == learned.Software.Id);
+        var other = Assert.Single(report, row => row.SoftwareId is null);
+        Assert.Equal(10 * 60, blender.DurationSeconds);
+        Assert.Equal(10 * 60, other.DurationSeconds);
     }
 
     [Fact]
@@ -2637,7 +2701,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         Assert.Equal(["ProjectId", "SoftwareId", "IsExcluded"], await ReadColumnNamesAsync(verification, "ProjectSoftwareSettings"));
         Assert.Equal(["ProjectId", "SoftwareId", "TagId"], await ReadColumnNamesAsync(verification, "ProjectSoftwareTags"));
         Assert.Equal(["TagId", "ProjectId"], await ReadColumnNamesAsync(verification, "ProjectTags"));
-        Assert.Equal(["TimeEntryId", "SoftwareId"], await ReadColumnNamesAsync(verification, "TimeEntrySoftware"));
+        Assert.Equal(["TimeEntryId", "SoftwareId", "LegacyAllocationEndUtc"], await ReadColumnNamesAsync(verification, "TimeEntrySoftware"));
         Assert.NotEmpty(Directory.GetFiles(_directory, "legacy.db.backup-v1-*"));
     }
 
@@ -3827,7 +3891,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'ProfileSync%';";
         Assert.Equal(7L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         verifyCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(28L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Equal(29L, (long)(await verifyCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -4086,7 +4150,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await versionConnection.OpenAsync();
         await using var versionCommand = versionConnection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(28L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(29L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     private static TrelloCard CreateTrelloCard(

@@ -201,4 +201,4 @@ flowchart LR
 - Google Sheets is a two-way whole-profile revision transport; SQLite remains the local operational store and visible daily tabs are never imported as authoritative rows.
 - Neither integration replaces SQLite as the running application's source of truth.
 
-See [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) for the schema-28/protocol-2 local state, hidden worksheet contracts, revision graph, conflict resolution, and device-presence lifecycle.
+See [GOOGLE_SHEETS_SYNC.md](GOOGLE_SHEETS_SYNC.md) for the schema-29/protocol-3 local state, hidden worksheet contracts, revision graph, conflict resolution, and device-presence lifecycle.

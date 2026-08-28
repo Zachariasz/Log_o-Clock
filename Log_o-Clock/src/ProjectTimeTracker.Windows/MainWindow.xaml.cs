@@ -112,6 +112,10 @@ public partial class MainWindow : Window
     private IReadOnlyList<Client> _reportClients = [];
     private IReadOnlyList<Project> _reportProjects = [];
     private IReadOnlyList<SavedTask> _reportTasks = [];
+    private IReadOnlyList<ProjectReportSummaryRow> _reportChartProjectRows = [];
+    private IReadOnlyList<ReportRow> _reportChartRows = [];
+    private IReadOnlyList<SoftwareUsageSummary> _reportChartSoftwareRows = [];
+    private string _reportChartBaseRangeText = string.Empty;
     private IReadOnlyList<TagDefinition> _tagDefinitions = [];
     private IReadOnlyList<TimeEntryRow> _historyRows = [];
     private IReadOnlyList<TaskRow> _taskRows = [];
@@ -631,8 +635,10 @@ public partial class MainWindow : Window
     internal void VerifyReportClientChartForPreview(
         IReadOnlyDictionary<string, long> expectedClients)
     {
+        ReportBossStatsToggle.IsChecked = false;
+        UpdateAllReportCharts();
         var rows = ReportClientLegendItems.ItemsSource?
-            .OfType<ClientReportSummaryRow>()
+            .OfType<ReportChartSummaryRow>()
             .ToArray() ?? [];
         var tabs = ReportChartTabs.Items.OfType<TabItem>().ToArray();
         var expectedTotalSeconds = expectedClients.Values.Sum();
@@ -643,19 +649,19 @@ public partial class MainWindow : Window
             rows.Length != expectedClients.Count ||
             expectedClients.Any(expected =>
                 rows.All(row =>
-                    !string.Equals(row.Client, expected.Key, StringComparison.Ordinal) ||
+                    !string.Equals(row.Label, expected.Key, StringComparison.Ordinal) ||
                     row.TotalSeconds != expected.Value)) ||
             !string.Equals(
                 ReportClientDonutTotalHours.Text,
                 FormatReportChartDuration(expectedTotalSeconds),
                 StringComparison.Ordinal) ||
             ReportClientDonutImage.Source is not DrawingImage ||
-            !ReportClientChartRangeText.Text.StartsWith(
-                "Current month",
-                StringComparison.Ordinal))
+            !string.Equals(ReportClientChartRangeText.Text, _reportChartBaseRangeText, StringComparison.Ordinal) ||
+            ReportBossStatsToggle.IsChecked != false ||
+            ReportInclusiveChartCard.Visibility != Visibility.Collapsed)
         {
             throw new InvalidOperationException(
-                "Reports is missing its switchable current-month client chart or its client totals are incorrect.");
+                "Reports is missing its filtered Client chart, shared idle toggle, or client totals are incorrect.");
         }
 
         ReportChartTabs.SelectedIndex = 1;
@@ -673,17 +679,19 @@ public partial class MainWindow : Window
     {
         var firstId = Guid.NewGuid();
         var secondId = Guid.NewGuid();
-        var rows = BuildSoftwareReportRows(
+        _reportChartSoftwareRows =
         [
-            new SoftwareUsageSummary(firstId, "Blender", "BLENDER", 5_400),
-            new SoftwareUsageSummary(secondId, "Maya", "MAYA", 1_800),
-        ]);
-        ReportSoftwareLegendItems.ItemsSource = rows;
-        UpdateReportSoftwareDonut(rows);
-        ReportSoftwareChartRangeText.Text = "Preview range";
+            new SoftwareUsageSummary(firstId, "Blender", "BLENDER", 5_400, 6_300),
+            new SoftwareUsageSummary(secondId, "Maya", "MAYA", 1_800, 2_700),
+        ];
+        _reportChartBaseRangeText = "Preview range";
+        ReportBossStatsToggle.IsChecked = false;
+        UpdateAllReportCharts();
+        var rows = ReportSoftwareLegendItems.ItemsSource?
+            .OfType<ReportChartSummaryRow>()
+            .ToArray() ?? [];
         var tabs = ReportChartTabs.Items.OfType<TabItem>().ToArray();
         if (rows.Length != 2 ||
-            rows[0].SoftwareId != firstId ||
             !string.Equals(rows[0].Label, "Blender", StringComparison.Ordinal) ||
             !rows[0].LegendDetail.Contains("BLENDER", StringComparison.Ordinal) ||
             !string.Equals(ReportSoftwareDonutTotalHours.Text, "2:00 h", StringComparison.Ordinal) ||
@@ -693,6 +701,15 @@ public partial class MainWindow : Window
         {
             throw new InvalidOperationException(
                 "Reports is missing its exact-duration Software donut or legend details.");
+        }
+
+        ReportBossStatsToggle.IsChecked = true;
+        UpdateAllReportCharts();
+        if (!string.Equals(ReportSoftwareDonutTotalHours.Text, "2:30 h", StringComparison.Ordinal) ||
+            !ReportSoftwareChartRangeText.Text.Contains("idle intervals", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Stats for the Boss did not switch the Software chart to short-idle-inclusive time.");
         }
 
         ReportChartTabs.SelectedIndex = 2;
@@ -1096,9 +1113,9 @@ public partial class MainWindow : Window
             SoftwareProjectCombo, SoftwareGrid, RuleProjectCombo, RulesGrid,
             ReportRangePicker, ReportClientCombo, ReportProjectCombo, ReportTaskCombo,
             ReportThisMonthButton, ReportThisWeekButton, ReportTodayButton,
-            ReportTagCombo, ReportPaidCombo, ReportChartTabs,
-            ReportDonutImage, ReportClientDonutImage, ReportSoftwareDonutImage, ReportInclusiveDonutImage,
-            ReportSoftwareLegendItems, ReportInclusiveLegendItems, ReportGrid, ReportTargetsList,
+            ReportTagCombo, ReportPaidCombo, ReportChartTabs, ReportBossStatsToggle,
+            ReportDonutImage, ReportClientDonutImage, ReportSoftwareDonutImage,
+            ReportSoftwareLegendItems, ReportGrid, ReportTargetsList,
             ReportSaveViewButton, ReportColumnsButton,
             SidebarTargetsPanel, SidebarTargetsResizeThumb, TargetsGrid, FloatingTargetsGrid,
             SettingsCategoryTabs, RecognitionCheck, AutomaticRecognitionToggle,
@@ -4768,6 +4785,7 @@ public partial class MainWindow : Window
             ReportProjectCombo.SelectedIndex = 0;
             ReportTaskCombo.SelectedIndex = 0;
             ReportPaidCombo.SelectedIndex = 0;
+            ReportBossStatsToggle.IsChecked = false;
             if (ReportTagCombo.ItemsSource is IEnumerable<TagOption> tags)
             {
                 ReportTagCombo.SelectedItem = tags.FirstOrDefault(tag => tag.Value is null);
@@ -8813,19 +8831,14 @@ public partial class MainWindow : Window
         ReportGrid.SelectedItem = projectRows.FirstOrDefault(row => row.ProjectId == _reportTargetProjectId);
         ReportGrid.UpdateLayout();
         ApplyReportViewToVisibleElements();
-        ReportLegendItems.ItemsSource = projectRows;
-        UpdateReportDonut(projectRows);
-        ReportInclusiveLegendItems.ItemsSource = projectRows;
-        UpdateReportInclusiveDonut(projectRows);
-        var softwareRows = BuildSoftwareReportRows(softwareUsage);
-        ReportSoftwareLegendItems.ItemsSource = softwareRows;
-        UpdateReportSoftwareDonut(softwareRows);
+        _reportChartProjectRows = projectRows;
+        _reportChartRows = rows;
+        _reportChartSoftwareRows = softwareUsage;
 
         var fromDate = (ReportRangePicker.StartDate ?? DateTime.Today).Date;
         var toDate = (ReportRangePicker.EndDate ?? fromDate).Date;
-        ReportChartRangeText.Text =
-            $"{AppTextCulture.FormatShortDate(fromDate)} – {AppTextCulture.FormatShortDate(toDate)}";
-        ReportSoftwareChartRangeText.Text = ReportChartRangeText.Text;
+        _reportChartBaseRangeText =
+            $"{AppTextCulture.FormatShortDate(fromDate)} - {AppTextCulture.FormatShortDate(toDate)}";
 
         ReportInclusiveChartRangeText.Text =
             ReportChartRangeText.Text +
@@ -8837,9 +8850,7 @@ public partial class MainWindow : Window
         var dailyRows = await _store.GetReportAsync(day.StartUtc, day.EndUtc);
         var weeklyRows = await _store.GetReportAsync(week.StartUtc, week.EndUtc);
         var monthlyRows = await _store.GetReportAsync(month.StartUtc, month.EndUtc);
-        var clientRows = BuildClientReportRows(monthlyRows);
-        ReportClientLegendItems.ItemsSource = clientRows;
-        UpdateReportClientDonut(clientRows);
+        UpdateAllReportCharts();
         var monthStartDate = TimeZoneInfo.ConvertTime(month.StartUtc, TimeZoneInfo.Local).Date;
         var monthEndDate = TimeZoneInfo.ConvertTime(
             month.EndUtc.AddTicks(-1),
@@ -8847,6 +8858,7 @@ public partial class MainWindow : Window
         ReportClientChartRangeText.Text =
             $"Current month · {AppTextCulture.FormatShortDate(monthStartDate)} – " +
             AppTextCulture.FormatShortDate(monthEndDate);
+        UpdateAllReportCharts();
         await RefreshTargetsAsync(dailyRows, weeklyRows, monthlyRows);
 
     }
@@ -8932,6 +8944,107 @@ public partial class MainWindow : Window
             row => row.Color);
     }
 
+    private void UpdateAllReportCharts()
+    {
+        var includeShortIdle = ReportBossStatsToggle.IsChecked == true;
+        var projectRows = CreateReportChartRows(_reportChartProjectRows.Select(row => new ReportChartMetricSource(
+            row.Project,
+            null,
+            row.Color,
+            row.TotalSeconds,
+            row.TotalWithShortIdleSeconds)), includeShortIdle);
+        var clientRows = BuildClientReportChartRows(_reportChartRows, includeShortIdle);
+        var softwareRows = BuildSoftwareReportChartRows(_reportChartSoftwareRows, includeShortIdle);
+
+        ApplyReportChart(ReportLegendItems, ReportDonutTotalHours, ReportDonutImage, projectRows);
+        ApplyReportChart(ReportClientLegendItems, ReportClientDonutTotalHours, ReportClientDonutImage, clientRows);
+        ApplyReportChart(ReportSoftwareLegendItems, ReportSoftwareDonutTotalHours, ReportSoftwareDonutImage, softwareRows);
+
+        var rangeText = includeShortIdle
+            ? _reportChartBaseRangeText + $" | idle intervals up to {_controller.ShortIdleReportingMaximumMinutes} min"
+            : _reportChartBaseRangeText;
+        ReportChartRangeText.Text = rangeText;
+        ReportClientChartRangeText.Text = rangeText;
+        ReportSoftwareChartRangeText.Text = rangeText;
+    }
+
+    private static ReportChartSummaryRow[] BuildClientReportChartRows(
+        IReadOnlyList<ReportRow> rows,
+        bool includeShortIdle) =>
+        CreateReportChartRows(
+            rows.GroupBy(row => row.ClientName, StringComparer.OrdinalIgnoreCase)
+                .Select((group, index) => new ReportChartMetricSource(
+                    group.First().ClientName,
+                    null,
+                    ReportClientChartColors[index % ReportClientChartColors.Length],
+                    group.Sum(row => row.DurationSeconds),
+                    group.Sum(row => row.DurationWithShortIdleSeconds))),
+            includeShortIdle);
+
+    private static ReportChartSummaryRow[] BuildSoftwareReportChartRows(
+        IReadOnlyList<SoftwareUsageSummary> rows,
+        bool includeShortIdle)
+    {
+        var colors = rows
+            .Where(row => row.SoftwareId is not null)
+            .OrderBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .Select((row, index) => (SoftwareId: row.SoftwareId!.Value, Color: ReportClientChartColors[index % ReportClientChartColors.Length]))
+            .ToDictionary(row => row.SoftwareId, row => row.Color);
+        return CreateReportChartRows(
+            rows.Select(row => new ReportChartMetricSource(
+                row.Label,
+                string.IsNullOrWhiteSpace(row.ProcessName) ? null : row.ProcessName,
+                row.SoftwareId is { } softwareId ? colors[softwareId] : "#687582",
+                row.DurationSeconds,
+                row.DurationWithShortIdleSeconds)),
+            includeShortIdle);
+    }
+
+    private static ReportChartSummaryRow[] CreateReportChartRows(
+        IEnumerable<ReportChartMetricSource> source,
+        bool includeShortIdle)
+    {
+        var values = source
+            .Select(row => (Row: row, Seconds: includeShortIdle ? row.InclusiveSeconds : row.ActiveSeconds))
+            .Where(row => row.Seconds > 0)
+            .OrderByDescending(row => row.Seconds)
+            .ThenBy(row => row.Row.Label, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var totalSeconds = values.Sum(row => row.Seconds);
+        return values
+            .Select(row => new ReportChartSummaryRow(
+                row.Row.Label,
+                row.Row.Detail,
+                row.Row.Color,
+                row.Seconds,
+                totalSeconds == 0 ? 0 : row.Seconds * 100d / totalSeconds))
+            .ToArray();
+    }
+
+    private static void ApplyReportChart(
+        ItemsControl legend,
+        TextBlock totalText,
+        Image image,
+        IReadOnlyList<ReportChartSummaryRow> rows)
+    {
+        var totalSeconds = rows.Sum(row => row.TotalSeconds);
+        legend.ItemsSource = rows;
+        totalText.Text = FormatReportChartDuration(totalSeconds);
+        image.Source = CreateDonutDrawing(
+            rows,
+            totalSeconds,
+            row => row.TotalSeconds,
+            row => row.Color);
+    }
+
+    private sealed record ReportChartMetricSource(
+        string Label,
+        string? Detail,
+        string Color,
+        long ActiveSeconds,
+        long InclusiveSeconds);
+
     private static ClientReportSummaryRow[] BuildClientReportRows(
         IReadOnlyList<ReportRow> rows)
     {
@@ -8967,42 +9080,6 @@ public partial class MainWindow : Window
         var totalSeconds = rows.Sum(row => row.TotalSeconds);
         ReportClientDonutTotalHours.Text = FormatReportChartDuration(totalSeconds);
         ReportClientDonutImage.Source = CreateDonutDrawing(
-            rows,
-            totalSeconds,
-            row => row.TotalSeconds,
-            row => row.Color);
-    }
-
-    private static SoftwareReportSummaryRow[] BuildSoftwareReportRows(
-        IReadOnlyList<SoftwareUsageSummary> rows)
-    {
-        var totalSeconds = rows.Sum(row => row.DurationSeconds);
-        var colors = rows
-            .OrderBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(row => row.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .Select((row, index) => (
-                row.SoftwareId,
-                Color: ReportClientChartColors[index % ReportClientChartColors.Length]))
-            .ToDictionary(item => item.SoftwareId, item => item.Color);
-        return rows
-            .OrderByDescending(row => row.DurationSeconds)
-            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(row => row.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .Select(row => new SoftwareReportSummaryRow(
-                row.SoftwareId,
-                row.Label,
-                row.ProcessName,
-                colors[row.SoftwareId],
-                row.DurationSeconds,
-                totalSeconds == 0 ? 0 : row.DurationSeconds * 100d / totalSeconds))
-            .ToArray();
-    }
-
-    private void UpdateReportSoftwareDonut(IReadOnlyList<SoftwareReportSummaryRow> rows)
-    {
-        var totalSeconds = rows.Sum(row => row.TotalSeconds);
-        ReportSoftwareDonutTotalHours.Text = FormatReportChartDuration(totalSeconds);
-        ReportSoftwareDonutImage.Source = CreateDonutDrawing(
             rows,
             totalSeconds,
             row => row.TotalSeconds,
@@ -9370,6 +9447,18 @@ public partial class MainWindow : Window
         }
 
         await RefreshReportAsync();
+    }
+
+    private void ReportBossStatsToggle_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingReportFilters)
+        {
+            return;
+        }
+
+        UpdateAllReportCharts();
     }
 
     private async void ReportDateRangeChanged(object sender, DateRangeChangedEventArgs e)

@@ -30,7 +30,7 @@ public sealed partial class SqliteTrackerStore
         new("TrelloMappingLists", "TrelloMappingLists", ["MappingId", "ListId"], ["MappingId", "ListId", "ListName"], 50),
         new("ExternalTaskLinks", "ExternalTaskLinks", ["Provider", "ExternalId"], ["Provider", "ExternalId", "TaskId", "MappingId", "BoardId", "ListId", "WebUrl", "State", "RemoteModifiedUtc"], 60),
         new("TimeEntries", "TimeEntries", ["Id"], ["Id", "ProjectId", "TaskId", "Description", "StartUtc", "EndUtc", "LastCheckpointUtc", "DetailsPending", "Source", "CreatedUtc", "ModifiedUtc", "IsPaid", "IsCall"], 70),
-        new("TimeEntrySoftware", "TimeEntrySoftware", ["TimeEntryId", "SoftwareId"], ["TimeEntryId", "SoftwareId"], 80),
+        new("TimeEntrySoftware", "TimeEntrySoftware", ["TimeEntryId", "SoftwareId"], ["TimeEntryId", "SoftwareId", "LegacyAllocationEndUtc"], 80),
         new("TimeEntrySoftwareIntervals", "TimeEntrySoftwareIntervals", ["Id"], ["Id", "TimeEntryId", "SoftwareId", "StartUtc", "EndUtc"], 80),
         new("TimeExclusions", "TimeExclusions", ["Id"], ["Id", "TimeEntryId", "StartUtc", "EndUtc", "Reason"], 80),
         new("Settings", "Settings", ["Key"], ["Key", "Value"], 90),
@@ -1237,6 +1237,11 @@ public sealed partial class SqliteTrackerStore
             transaction,
             entryId,
             cancellationToken);
+        values["__LegacySoftwareAllocations"] = await ReadLegacySoftwareAllocationPayloadsAsync(
+            connection,
+            transaction,
+            entryId,
+            cancellationToken);
         values["__SoftwareIntervals"] = await ReadEntrySoftwareIntervalPayloadsAsync(
             connection,
             transaction,
@@ -1309,6 +1314,29 @@ public sealed partial class SqliteTrackerStore
                 ["Id"] = reader.GetString(0),
                 ["SoftwareId"] = reader.GetString(1),
                 ["StartUtc"] = reader.GetString(2),
+            });
+        }
+        return result;
+    }
+
+    private static async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadLegacySoftwareAllocationPayloadsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Guid entryId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT SoftwareId, LegacyAllocationEndUtc FROM TimeEntrySoftware WHERE TimeEntryId = $entry AND LegacyAllocationEndUtc IS NOT NULL ORDER BY SoftwareId;";
+        command.Parameters.AddWithValue("$entry", entryId.ToString("D"));
+        var result = new List<IReadOnlyDictionary<string, object?>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new SortedDictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["EndUtc"] = reader.GetString(1),
+                ["SoftwareId"] = reader.GetString(0),
             });
         }
         return result;
@@ -1756,6 +1784,43 @@ public sealed partial class SqliteTrackerStore
             }
         }
 
+        if (document.RootElement.TryGetProperty("__LegacySoftwareAllocations", out var legacyElement))
+        {
+            if (legacyElement.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidDataException("The synchronized legacy software allocation list is invalid.");
+            }
+            foreach (var item in legacyElement.EnumerateArray())
+            {
+                if (item.ValueKind != JsonValueKind.Object ||
+                    !item.TryGetProperty("SoftwareId", out var softwareIdElement) ||
+                    !item.TryGetProperty("EndUtc", out var endElement))
+                {
+                    throw new InvalidDataException("A synchronized legacy software allocation is incomplete.");
+                }
+                var softwareId = softwareIdElement.GetString();
+                var endUtc = endElement.GetString();
+                if (string.IsNullOrWhiteSpace(softwareId) || string.IsNullOrWhiteSpace(endUtc))
+                {
+                    throw new InvalidDataException("A synchronized legacy software allocation contains an invalid value.");
+                }
+                softwareId = await ResolveSyncAliasAsync(
+                    connection,
+                    transaction,
+                    "Software",
+                    softwareId,
+                    cancellationToken);
+                await ExecuteInTransactionAsync(
+                    connection,
+                    transaction,
+                    "UPDATE TimeEntrySoftware SET LegacyAllocationEndUtc = $end WHERE TimeEntryId = $entry AND SoftwareId = $software;",
+                    cancellationToken,
+                    ("$end", endUtc),
+                    ("$entry", entryId),
+                    ("$software", softwareId));
+            }
+        }
+
         if (!document.RootElement.TryGetProperty("__Exclusions", out var exclusionsElement))
         {
             return;
@@ -2159,6 +2224,18 @@ public sealed partial class SqliteTrackerStore
                 }
                 values["__SoftwareIntervals"] = duplicateIntervals;
             }
+            if (document.RootElement.TryGetProperty("__LegacySoftwareAllocations", out var legacyElement) &&
+                legacyElement.ValueKind == JsonValueKind.Array)
+            {
+                values["__LegacySoftwareAllocations"] = legacyElement
+                    .EnumerateArray()
+                    .Select(item => (IReadOnlyDictionary<string, object?>)new SortedDictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["EndUtc"] = item.GetProperty("EndUtc").GetString(),
+                        ["SoftwareId"] = item.GetProperty("SoftwareId").GetString(),
+                    })
+                    .ToArray();
+            }
             if (document.RootElement.TryGetProperty("__Exclusions", out var exclusionsElement) &&
                 exclusionsElement.ValueKind == JsonValueKind.Array)
             {
@@ -2200,8 +2277,8 @@ public sealed partial class SqliteTrackerStore
                 connection,
                 transaction,
                 """
-                INSERT OR IGNORE INTO TimeEntrySoftware (TimeEntryId, SoftwareId)
-                SELECT $duplicate, SoftwareId FROM TimeEntrySoftware WHERE TimeEntryId = $original;
+                INSERT OR IGNORE INTO TimeEntrySoftware (TimeEntryId, SoftwareId, LegacyAllocationEndUtc)
+                SELECT $duplicate, SoftwareId, LegacyAllocationEndUtc FROM TimeEntrySoftware WHERE TimeEntryId = $original;
                 """,
                 cancellationToken,
                 ("$duplicate", duplicateId.ToString("D")),

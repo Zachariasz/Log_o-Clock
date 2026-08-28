@@ -611,10 +611,11 @@ public sealed record ReportRow(
     long CallDurationSeconds = 0);
 
 public sealed record SoftwareUsageSummary(
-    Guid SoftwareId,
+    Guid? SoftwareId,
     string Label,
     string ProcessName,
-    long DurationSeconds);
+    long DurationSeconds,
+    long DurationWithShortIdleSeconds);
 
 public static class ShortIdleReportingSettings
 {

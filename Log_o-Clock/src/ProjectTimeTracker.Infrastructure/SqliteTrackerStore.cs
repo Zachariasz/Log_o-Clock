@@ -6,7 +6,7 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed partial class SqliteTrackerStore : ITrackerStore
 {
-    private const int SchemaVersion = 28;
+    private const int SchemaVersion = 29;
     private static readonly TimeSpan MinimumEntryDuration = TimeSpan.FromMinutes(1);
     private readonly string _connectionString;
     private readonly TimeZoneInfo _monthlyLogTimeZone;
@@ -221,6 +221,15 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                     cancellationToken) == 0)
             {
                 await ExecuteAsync(connection, MigrationV28Sql, cancellationToken);
+            }
+
+            if (version < 29 &&
+                await ScalarLongAsync(
+                    connection,
+                    "SELECT COUNT(*) FROM pragma_table_info('TimeEntrySoftware') WHERE name = 'LegacyAllocationEndUtc';",
+                    cancellationToken) == 0)
+            {
+                await ExecuteAsync(connection, MigrationV29Sql, cancellationToken);
             }
 
             await ExecuteAsync(connection, SchemaV21IndexesSql, cancellationToken);
@@ -4759,6 +4768,9 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         CancellationToken cancellationToken = default)
     {
         var nowUtc = DateTimeOffset.UtcNow;
+        var shortIdleMaximumMinutes = ShortIdleReportingSettings.ParseMaximumMinutes(
+            await GetSettingAsync(ShortIdleReportingSettings.MaximumMinutesKey, cancellationToken));
+        var shortIdleMaximumSeconds = checked(shortIdleMaximumMinutes * 60);
         var tag = TagParser.Normalize(filter.Tag);
         var taskMode = filter.UnassignedTaskOnly ? 2 : filter.TaskId is null ? 0 : 1;
         var paid = filter.PaidStatus switch
@@ -4767,7 +4779,7 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             PaidStatusFilter.Unpaid => 0,
             _ => -1,
         };
-        return await QueryAsync(
+        var exactRows = await QueryAsync(
             """
             WITH IntervalDurations AS (
                 SELECT s.Id AS SoftwareId,
@@ -4786,7 +4798,23 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                                  AND x.StartUtc < MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)
                                  AND x.EndUtc > MAX(i.StartUtc, e.StartUtc, $from)
                            ), 0)
-                       ) AS DurationSeconds
+                       ) AS DurationSeconds,
+                       MAX(0,
+                           CAST(strftime('%s', MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                           - CAST(strftime('%s', MAX(i.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                           - COALESCE((
+                               SELECT SUM(MAX(0,
+                                   CAST(strftime('%s', MIN(x.EndUtc, COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                                   - CAST(strftime('%s', MAX(x.StartUtc, i.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                               ))
+                               FROM TimeExclusions x
+                               WHERE x.TimeEntryId = e.Id
+                                 AND x.StartUtc < MIN(COALESCE(i.EndUtc, $now), COALESCE(e.EndUtc, $now), $to)
+                                 AND x.EndUtc > MAX(i.StartUtc, e.StartUtc, $from)
+                                 AND CAST(strftime('%s', x.EndUtc) AS INTEGER)
+                                     - CAST(strftime('%s', x.StartUtc) AS INTEGER) > $shortIdleMaximumSeconds
+                           ), 0)
+                       ) AS DurationWithShortIdleSeconds
                 FROM TimeEntrySoftwareIntervals i
                 JOIN Software s ON s.Id = i.SoftwareId AND s.IsHidden = 0
                 JOIN TimeEntries e ON e.Id = i.TimeEntryId
@@ -4804,27 +4832,154 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
                   AND ($tag IS NULL OR has_tag(e.Description, $tag))
                   AND ($paid = -1 OR e.IsPaid = $paid)
             )
-            SELECT SoftwareId, Label, ProcessName, CAST(SUM(DurationSeconds) AS INTEGER)
+            SELECT SoftwareId, Label, ProcessName,
+                   CAST(SUM(DurationSeconds) AS INTEGER),
+                   CAST(SUM(DurationWithShortIdleSeconds) AS INTEGER)
             FROM IntervalDurations
             GROUP BY SoftwareId, Label, ProcessName
-            HAVING SUM(DurationSeconds) > 0
-            ORDER BY SUM(DurationSeconds) DESC, Label COLLATE NOCASE, ProcessName COLLATE NOCASE;
+            HAVING SUM(DurationSeconds) > 0 OR SUM(DurationWithShortIdleSeconds) > 0;
             """,
-            reader => new SoftwareUsageSummary(
+            reader => (
                 Guid.Parse(reader.GetString(0)),
                 reader.GetString(1),
                 reader.GetString(2),
-                reader.GetInt64(3)),
+                reader.GetInt64(3),
+                reader.GetInt64(4)),
             cancellationToken,
             ("$from", Format(fromUtc)),
             ("$to", Format(toUtc)),
             ("$now", Format(nowUtc)),
+            ("$shortIdleMaximumSeconds", shortIdleMaximumSeconds),
             ("$client", filter.ClientId?.ToString("D")),
             ("$project", filter.ProjectId?.ToString("D")),
             ("$taskMode", taskMode),
             ("$task", filter.TaskId?.ToString("D")),
             ("$tag", tag),
             ("$paid", paid));
+
+        var legacyRows = await QueryAsync(
+            """
+            SELECT e.Id, s.Id, s.Label, s.ProcessName,
+                   MAX(0,
+                       CAST(strftime('%s', MIN(es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                       - CAST(strftime('%s', MAX(e.StartUtc, $from)) AS INTEGER)
+                       - COALESCE((
+                           SELECT SUM(MAX(0,
+                               CAST(strftime('%s', MIN(x.EndUtc, es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                               - CAST(strftime('%s', MAX(x.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                           ))
+                           FROM TimeExclusions x
+                           WHERE x.TimeEntryId = e.Id
+                             AND x.StartUtc < MIN(es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)
+                             AND x.EndUtc > MAX(e.StartUtc, $from)
+                       ), 0)
+                   ),
+                   MAX(0,
+                       CAST(strftime('%s', MIN(es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                       - CAST(strftime('%s', MAX(e.StartUtc, $from)) AS INTEGER)
+                       - COALESCE((
+                           SELECT SUM(MAX(0,
+                               CAST(strftime('%s', MIN(x.EndUtc, es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)) AS INTEGER)
+                               - CAST(strftime('%s', MAX(x.StartUtc, e.StartUtc, $from)) AS INTEGER)
+                           ))
+                           FROM TimeExclusions x
+                           WHERE x.TimeEntryId = e.Id
+                             AND x.StartUtc < MIN(es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)
+                             AND x.EndUtc > MAX(e.StartUtc, $from)
+                             AND CAST(strftime('%s', x.EndUtc) AS INTEGER)
+                                 - CAST(strftime('%s', x.StartUtc) AS INTEGER) > $shortIdleMaximumSeconds
+                       ), 0)
+                   )
+            FROM TimeEntrySoftware es
+            JOIN Software s ON s.Id = es.SoftwareId AND s.IsHidden = 0
+            JOIN TimeEntries e ON e.Id = es.TimeEntryId
+            JOIN Projects p ON p.Id = e.ProjectId
+            JOIN Clients c ON c.Id = p.ClientId
+            WHERE es.LegacyAllocationEndUtc IS NOT NULL
+              AND e.StartUtc < MIN(es.LegacyAllocationEndUtc, COALESCE(e.EndUtc, $now), $to)
+              AND es.LegacyAllocationEndUtc > $from
+              AND ($client IS NULL OR c.Id = $client)
+              AND ($project IS NULL OR p.Id = $project)
+              AND ($taskMode = 0
+                   OR ($taskMode = 1 AND e.TaskId = $task)
+                   OR ($taskMode = 2 AND e.TaskId IS NULL))
+              AND ($tag IS NULL OR has_tag(e.Description, $tag))
+              AND ($paid = -1 OR e.IsPaid = $paid);
+            """,
+            reader => (
+                EntryId: Guid.Parse(reader.GetString(0)),
+                SoftwareId: Guid.Parse(reader.GetString(1)),
+                Label: reader.GetString(2),
+                ProcessName: reader.GetString(3),
+                DurationSeconds: reader.GetInt64(4),
+                DurationWithShortIdleSeconds: reader.GetInt64(5)),
+            cancellationToken,
+            ("$from", Format(fromUtc)),
+            ("$to", Format(toUtc)),
+            ("$now", Format(nowUtc)),
+            ("$shortIdleMaximumSeconds", shortIdleMaximumSeconds),
+            ("$client", filter.ClientId?.ToString("D")),
+            ("$project", filter.ProjectId?.ToString("D")),
+            ("$taskMode", taskMode),
+            ("$task", filter.TaskId?.ToString("D")),
+            ("$tag", tag),
+            ("$paid", paid));
+
+        var totals = new Dictionary<Guid, (string Label, string ProcessName, long Active, long Inclusive)>();
+        foreach (var row in exactRows)
+        {
+            totals[row.Item1] = (row.Item2, row.Item3, row.Item4, row.Item5);
+        }
+
+        foreach (var entryGroup in legacyRows.GroupBy(row => row.EntryId))
+        {
+            var ordered = entryGroup.OrderBy(row => row.SoftwareId).ToArray();
+            var activeBase = ordered[0].DurationSeconds / ordered.Length;
+            var activeRemainder = ordered[0].DurationSeconds % ordered.Length;
+            var inclusiveBase = ordered[0].DurationWithShortIdleSeconds / ordered.Length;
+            var inclusiveRemainder = ordered[0].DurationWithShortIdleSeconds % ordered.Length;
+            for (var index = 0; index < ordered.Length; index++)
+            {
+                var row = ordered[index];
+                var active = activeBase + (index < activeRemainder ? 1 : 0);
+                var inclusive = inclusiveBase + (index < inclusiveRemainder ? 1 : 0);
+                var previous = totals.GetValueOrDefault(row.SoftwareId);
+                totals[row.SoftwareId] = (
+                    row.Label,
+                    row.ProcessName,
+                    previous.Active + active,
+                    previous.Inclusive + inclusive);
+            }
+        }
+
+        var reportRows = await GetReportAsync(fromUtc, toUtc, filter, cancellationToken);
+        var overallActive = reportRows.Sum(row => row.DurationSeconds);
+        var overallInclusive = reportRows.Sum(row => row.DurationWithShortIdleSeconds);
+        var result = totals
+            .Select(row => new SoftwareUsageSummary(
+                row.Key,
+                row.Value.Label,
+                row.Value.ProcessName,
+                row.Value.Active,
+                row.Value.Inclusive))
+            .ToList();
+        var otherActive = Math.Max(0, overallActive - result.Sum(row => row.DurationSeconds));
+        var otherInclusive = Math.Max(0, overallInclusive - result.Sum(row => row.DurationWithShortIdleSeconds));
+        if (otherActive > 0 || otherInclusive > 0)
+        {
+            result.Add(new SoftwareUsageSummary(
+                null,
+                "Other software",
+                string.Empty,
+                otherActive,
+                otherInclusive));
+        }
+
+        return result
+            .OrderByDescending(row => row.DurationSeconds)
+            .ThenBy(row => row.Label, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     public async Task<string?> GetSettingAsync(string key, CancellationToken cancellationToken = default)
@@ -6162,6 +6317,7 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
         CREATE TABLE IF NOT EXISTS TimeEntrySoftware (
             TimeEntryId TEXT NOT NULL REFERENCES TimeEntries(Id) ON DELETE CASCADE,
             SoftwareId TEXT NOT NULL REFERENCES Software(Id) ON DELETE CASCADE,
+            LegacyAllocationEndUtc TEXT NULL,
             PRIMARY KEY (TimeEntryId, SoftwareId)
         );
         CREATE INDEX IF NOT EXISTS IX_TimeEntrySoftware_SoftwareId ON TimeEntrySoftware (SoftwareId);
@@ -6462,6 +6618,23 @@ public sealed partial class SqliteTrackerStore : ITrackerStore
             SET EndUtc = NEW.EndUtc
             WHERE TimeEntryId = NEW.Id AND EndUtc IS NULL AND StartUtc < NEW.EndUtc;
         END;
+        """;
+
+    private const string MigrationV29Sql = """
+        ALTER TABLE TimeEntrySoftware
+        ADD COLUMN LegacyAllocationEndUtc TEXT NULL;
+
+        UPDATE TimeEntrySoftware
+        SET LegacyAllocationEndUtc = (
+            SELECT COALESCE(e.EndUtc, e.LastCheckpointUtc)
+            FROM TimeEntries e
+            WHERE e.Id = TimeEntrySoftware.TimeEntryId
+        )
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM TimeEntrySoftwareIntervals i
+            WHERE i.TimeEntryId = TimeEntrySoftware.TimeEntryId
+        );
         """;
 
     private const string SchemaV21IndexesSql = """

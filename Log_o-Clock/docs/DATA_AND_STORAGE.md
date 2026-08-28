@@ -51,7 +51,7 @@ If the root is not overridden, startup can copy the legacy `%LocalAppData%\Proje
 - Connection mode: read/write/create, shared cache, foreign keys enabled.
 - Runtime pragmas: foreign keys on, WAL journal mode, 5-second busy timeout.
 - Timestamps: UTC ISO round-trip text.
-- Current `PRAGMA user_version`: **28**.
+- Current `PRAGMA user_version`: **29**.
 - Upgrade: before an existing older database is changed, a sibling `TimeTracker.db.backup-v<old>-<timestamp>` is created.
 - Initialization also ensures system entities, removes invalid sub-minute completed entries and unused notification-created tasks, synchronizes tag definitions from descriptions, and refreshes derived files.
 
@@ -82,7 +82,7 @@ erDiagram
     SAVED_TASKS o|--o| EXTERNAL_TASK_LINKS : linked
 ```
 
-Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-28 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
+Additional singleton/operational tables are `TrelloConnections`, `Settings`, `GoogleSheetsEntryDeletions`, and the schema-29 `ProfileSync*` runtime, state, outbox, cursor, alias, and conflict tables.
 
 Full automatic recognition requires no schema migration. Its profile-scoped preferences use the existing `Settings` table: `recognition.automatic.enabled` defaults to `false`, while `recognition.automatic.grace-minutes` defaults to `10` and accepts whole minutes from 1 through 1440. Both are stable settings eligible for whole-profile synchronization. Turning project recognition off also persists automatic mode as disabled.
 
@@ -145,7 +145,7 @@ The service:
 - Stores non-secret account/spreadsheet/status metadata in the profile's `Settings` table.
 - Creates or joins one spreadsheet and stores protocol/profile metadata, an append-only revision journal, and device heartbeat/running status in hidden app-managed worksheets.
 - Records durable local mutations through transactional dirty markers and an SQLite outbox. Revision IDs deduplicate retries; the cloud row cursor advances only after local reconciliation commits.
-- Synchronizes completed entries, clients, projects, tasks, tags, configured software, recognition rules, targets/debt, Trello mappings/links, stable settings/layouts, and the shared profile name. Each entry revision also embeds its exact exclusion records and configured-software identities so selecting a cloud version or Keep both can reproduce that version precisely.
+- Synchronizes completed entries, clients, projects, tasks, tags, configured software, recognition rules, targets/debt, Trello mappings/links, stable settings/layouts, and the shared profile name. Each entry revision also embeds its exact exclusion records, configured-software identities and intervals, and any schema-29 legacy allocation boundary so selecting a cloud version or Keep both can reproduce that version precisely.
 - Excludes OAuth/Trello credentials, connection/error/update results, autostart, pending-review/runtime markers, and local running entries. Unknown observed titles and media/audio observations are never persisted or published.
 - Uses revision ancestry rather than wall-clock order. A single descendant applies automatically; concurrent heads create a persistent conflict while unrelated records continue.
 - Coalesces independently created same-path clients/projects/tasks, same-name tags, and same-process software through local identity aliases so dependent logs are preserved.
@@ -154,7 +154,7 @@ The service:
 - Rebuilds app-managed `yyyy-MM-dd` daily views globally by `EntryId`, in the profile's pinned worksheet time zone. They include call, creation, and modification timestamps with offsets; manual visible-sheet edits are overwritten.
 - Archives pre-protocol daily rows to `Legacy Review`. Rows absent from the owning SQLite store become one-time Import/Ignore conflicts because they have no trustworthy revision history.
 
-`CreatedUtc` is stable across edits. `ModifiedUtc` advances for meaningful entry changes, exclusions, software associations, and exact configured-software intervals, but not for 30-second timer checkpoints. All participating computers must run the schema-28, protocol-2 sync-capable version before joining the same spreadsheet.
+`CreatedUtc` is stable across edits. `ModifiedUtc` advances for meaningful entry changes, exclusions, software associations, and exact configured-software intervals, but not for 30-second timer checkpoints. All participating computers must run the schema-29, protocol-3 sync-capable version before joining the same spreadsheet.
 
 ## Trello data direction
 

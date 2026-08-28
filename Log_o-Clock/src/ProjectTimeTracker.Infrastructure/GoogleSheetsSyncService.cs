@@ -10,7 +10,7 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed partial class GoogleSheetsSyncService : IGoogleSheetsSyncService
 {
-    public const int CurrentSyncProtocolVersion = 2;
+    public const int CurrentSyncProtocolVersion = 3;
 
     private const string ProfileWorksheet = "__LogOClockProfile";
     private const string ChangesWorksheet = "__LogOClockChanges";
