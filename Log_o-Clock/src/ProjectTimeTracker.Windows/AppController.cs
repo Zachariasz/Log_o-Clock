@@ -129,6 +129,7 @@ public sealed class AppController : IAsyncDisposable
     public long RunningExcludedSeconds { get; private set; }
     public bool RecognitionEnabled { get; private set; } = true;
     public bool AutomaticRecognitionEnabled { get; private set; }
+    public bool AutomaticTaggingEnabled { get; private set; }
     public bool AutomationLearningEnabled { get; private set; }
     public bool AutomationLearningOnboardingSeen { get; private set; }
     public int AutomaticRecognitionGraceMinutes { get; private set; } =
@@ -180,6 +181,8 @@ public sealed class AppController : IAsyncDisposable
             StringComparison.OrdinalIgnoreCase);
         AutomaticRecognitionEnabled = RecognitionEnabled && AutomaticRecognitionSettings.ParseEnabled(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
+        AutomaticTaggingEnabled = RecognitionEnabled && AutomaticTaggingSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomaticTaggingSettings.EnabledKey, cancellationToken));
         AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
         AutomationLearningEnabled = AutomationLearningSettings.ParseEnabled(
@@ -326,6 +329,8 @@ public sealed class AppController : IAsyncDisposable
             StringComparison.OrdinalIgnoreCase);
         AutomaticRecognitionEnabled = RecognitionEnabled && AutomaticRecognitionSettings.ParseEnabled(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.EnabledKey, cancellationToken));
+        AutomaticTaggingEnabled = RecognitionEnabled && AutomaticTaggingSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomaticTaggingSettings.EnabledKey, cancellationToken));
         AutomaticRecognitionGraceMinutes = AutomaticRecognitionSettings.ParseGraceMinutes(
             await _store.GetSettingAsync(AutomaticRecognitionSettings.GraceMinutesKey, cancellationToken));
         AutomationLearningEnabled = AutomationLearningSettings.ParseEnabled(
@@ -389,8 +394,13 @@ public sealed class AppController : IAsyncDisposable
         if (!enabled)
         {
             AutomaticRecognitionEnabled = false;
+            AutomaticTaggingEnabled = false;
             await _store.SetSettingAsync(
                 AutomaticRecognitionSettings.EnabledKey,
+                "false",
+                cancellationToken);
+            await _store.SetSettingAsync(
+                AutomaticTaggingSettings.EnabledKey,
                 "false",
                 cancellationToken);
             _notificationService.DismissActive();
@@ -406,6 +416,24 @@ public sealed class AppController : IAsyncDisposable
             QueueActivity(activity);
         }
 
+        AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    public async Task SetAutomaticTaggingEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        if (enabled && !RecognitionEnabled)
+        {
+            RecognitionEnabled = true;
+            await _store.SetSettingAsync("recognition.enabled", "true", cancellationToken);
+        }
+
+        AutomaticTaggingEnabled = enabled;
+        await _store.SetSettingAsync(
+            AutomaticTaggingSettings.EnabledKey,
+            enabled ? "true" : "false",
+            cancellationToken);
         AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 

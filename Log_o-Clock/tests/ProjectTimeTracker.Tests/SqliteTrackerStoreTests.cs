@@ -216,7 +216,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'TimeEntrySoftwareIntervals';";
         Assert.Equal(1L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         verifyCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(29L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Equal(30L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         Assert.Single(Directory.GetFiles(directory, "TimeTracker.db.backup-v27-*"));
     }
 
@@ -3891,7 +3891,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         verifyCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'ProfileSync%';";
         Assert.Equal(7L, (long)(await verifyCommand.ExecuteScalarAsync())!);
         verifyCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(29L, (long)(await verifyCommand.ExecuteScalarAsync())!);
+        Assert.Equal(30L, (long)(await verifyCommand.ExecuteScalarAsync())!);
     }
 
     [Fact]
@@ -4150,7 +4150,7 @@ public sealed class SqliteTrackerStoreTests : IAsyncLifetime
         await versionConnection.OpenAsync();
         await using var versionCommand = versionConnection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
-        Assert.Equal(29L, (long)(await versionCommand.ExecuteScalarAsync())!);
+        Assert.Equal(30L, (long)(await versionCommand.ExecuteScalarAsync())!);
     }
 
     private static TrelloCard CreateTrelloCard(

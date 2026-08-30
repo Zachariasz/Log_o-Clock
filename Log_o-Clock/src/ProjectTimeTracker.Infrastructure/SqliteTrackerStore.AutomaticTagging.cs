@@ -6,12 +6,9 @@ namespace ProjectTimeTracker.Infrastructure;
 
 public sealed partial class SqliteTrackerStore
 {
-    public async Task<IReadOnlyList<AutomaticTagConcept>> GetAutomaticTagConceptsAsync(
-        CancellationToken cancellationToken = default)
-    {
-        await using var connection = await OpenAsync(cancellationToken);
-        return await QueryAsync(
-            connection,
+    public Task<IReadOnlyList<AutomaticTagConcept>> GetAutomaticTagConceptsAsync(
+        CancellationToken cancellationToken = default) =>
+        QueryAsync(
             """
             SELECT c.TagId, t.Name, c.MatchText, c.BuiltInKey, c.ModifiedUtc
             FROM AutomaticTagConcepts c
@@ -25,14 +22,11 @@ public sealed partial class SqliteTrackerStore
                 reader.IsDBNull(3) ? null : reader.GetString(3),
                 Parse(reader.GetString(4))),
             cancellationToken);
-    }
 
     public async Task<IReadOnlySet<string>> GetAutomaticTagConceptSuppressionsAsync(
         CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
         var items = await QueryAsync(
-            connection,
             "SELECT BuiltInKey FROM AutomaticTagConceptSuppressions ORDER BY BuiltInKey COLLATE NOCASE;",
             reader => reader.GetString(0),
             cancellationToken);
@@ -69,9 +63,7 @@ public sealed partial class SqliteTrackerStore
         Guid taskId,
         CancellationToken cancellationToken = default)
     {
-        await using var connection = await OpenAsync(cancellationToken);
         var descriptions = await QueryAsync(
-            connection,
             """
             SELECT Description
             FROM TimeEntries
@@ -99,6 +91,7 @@ public sealed partial class SqliteTrackerStore
             .Take(2)
             .ToArray();
         var leader = counts[0];
+        await using var connection = await OpenAsync(cancellationToken);
         await using var tagCommand = connection.CreateCommand();
         tagCommand.CommandText = "SELECT Id FROM Tags WHERE Name = $name COLLATE NOCASE LIMIT 1;";
         tagCommand.Parameters.AddWithValue("$name", leader.Name);
@@ -113,7 +106,7 @@ public sealed partial class SqliteTrackerStore
                 counts.Length > 1 ? counts[1].Count : 0);
     }
 
-    public async Task<IReadOnlyList<AutomaticTaggingQueueItem>> GetAutomaticTaggingQueueAsync(
+    public Task<IReadOnlyList<AutomaticTaggingQueueItem>> GetAutomaticTaggingQueueAsync(
         AutomaticTagQueueState? state = null,
         int limit = 100,
         CancellationToken cancellationToken = default)
@@ -123,9 +116,7 @@ public sealed partial class SqliteTrackerStore
             throw new ArgumentOutOfRangeException(nameof(limit));
         }
 
-        await using var connection = await OpenAsync(cancellationToken);
-        return await QueryAsync(
-            connection,
+        return QueryAsync(
             """
             SELECT q.EntryId, e.ProjectId, e.TaskId, task.Name, e.Description,
                    e.StartUtc, e.EndUtc, COALESCE(SUM(x.EndUtc IS NOT NULL) * 0, 0),

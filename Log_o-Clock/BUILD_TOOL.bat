@@ -16,13 +16,17 @@ set /p "APP_VERSION=New version number (current: %LAST_VERSION%; for example 1.1
 
 if not defined APP_VERSION (
     echo A version number is required. Build cancelled.
+    pause
     popd
     exit /b 1
 )
 
-powershell.exe -NoProfile -Command "if ($env:APP_VERSION -notmatch '^\d+\.\d+\.\d+$') { exit 1 }"
+for /f "tokens=* delims= " %%v in ("%APP_VERSION%") do set "APP_VERSION=%%v"
+
+powershell.exe -NoProfile -Command "if ($env:APP_VERSION.Trim() -notmatch '^\d+\.\d+\.\d+$') { exit 1 }"
 if errorlevel 1 (
     echo Invalid version "%APP_VERSION%". Use major.minor.patch, for example 1.143.0.
+    pause
     popd
     exit /b 1
 )
@@ -35,11 +39,13 @@ set "BUILD_EXIT_CODE=%ERRORLEVEL%"
 if not "%BUILD_EXIT_CODE%"=="0" (
     echo.
     echo Build failed with exit code %BUILD_EXIT_CODE%.
+    pause
     popd
     exit /b %BUILD_EXIT_CODE%
 )
 
 echo.
 echo Build completed successfully.
+pause
 popd
 exit /b 0

@@ -57,12 +57,14 @@ if ($LASTEXITCODE -ne 0) { throw "Application publish failed." }
 
 & $dotnet build $installerProject `
     --configuration Release `
+    -t:Rebuild `
     -p:NuGetAudit=false `
     -p:AppPublishDir=$publishDirectory `
     -p:ProductVersion=$AppVersion `
-    -p:OutputPath=$installerOutput `
+    -p:OutputPath=$installerOutput\ `
     -p:SuppressValidation=true `
     -p:BuildInParallel=false `
+    -p:UseSharedCompilation=false `
     -nodeReuse:false `
     -maxcpucount:1
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
