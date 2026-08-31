@@ -124,6 +124,7 @@ public sealed class AppController : IAsyncDisposable
     public event EventHandler? AutomaticRecognitionSettingsChanged;
     public event EventHandler? AutomationLearningSettingsChanged;
     public event EventHandler<AutomationLearningNotice?>? AutomationLearningNoticeChanged;
+    public event EventHandler? TrackLaunchTimeSettingsChanged;
 
     public TimeEntry? RunningEntry { get; private set; }
     public long RunningExcludedSeconds { get; private set; }
@@ -132,6 +133,7 @@ public sealed class AppController : IAsyncDisposable
     public bool AutomaticTaggingEnabled { get; private set; }
     public bool AutomationLearningEnabled { get; private set; }
     public bool AutomationLearningOnboardingSeen { get; private set; }
+    public bool TrackLaunchTimeEnabled { get; private set; }
     public int AutomaticRecognitionGraceMinutes { get; private set; } =
         AutomaticRecognitionSettings.DefaultGraceMinutes;
     public bool CallsIdleProtectionEnabled { get; private set; } = true;
@@ -189,6 +191,8 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(AutomationLearningSettings.EnabledKey, cancellationToken));
         AutomationLearningOnboardingSeen = AutomationLearningSettings.ParseOnboardingSeen(
             await _store.GetSettingAsync(AutomationLearningSettings.OnboardingSeenKey, cancellationToken));
+        TrackLaunchTimeEnabled = AutomationLaunchTrackingSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomationLaunchTrackingSettings.EnabledKey, cancellationToken));
         _automaticRecognitionPolicy.SetGracePeriod(
             TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
@@ -291,6 +295,14 @@ public sealed class AppController : IAsyncDisposable
         _idleProtectionMonitor.Start();
         _idleMonitor.Start();
         _sessionMonitor.Start();
+        if (TrackLaunchTimeEnabled && RunningEntry is null)
+        {
+            await StartTimerAsync(
+                SystemEntityIds.UnassignedProjectId,
+                TrackingSource.AutomaticRecognition,
+                showDetails: false,
+                cancellationToken: cancellationToken);
+        }
         ResetAutomaticRecognitionPolicy();
         if (AutomaticRecognitionEnabled)
         {
@@ -337,6 +349,8 @@ public sealed class AppController : IAsyncDisposable
             await _store.GetSettingAsync(AutomationLearningSettings.EnabledKey, cancellationToken));
         AutomationLearningOnboardingSeen = AutomationLearningSettings.ParseOnboardingSeen(
             await _store.GetSettingAsync(AutomationLearningSettings.OnboardingSeenKey, cancellationToken));
+        TrackLaunchTimeEnabled = AutomationLaunchTrackingSettings.ParseEnabled(
+            await _store.GetSettingAsync(AutomationLaunchTrackingSettings.EnabledKey, cancellationToken));
         _automaticRecognitionPolicy.SetGracePeriod(
             TimeSpan.FromMinutes(AutomaticRecognitionGraceMinutes));
         CallsIdleProtectionEnabled = IdleProtectionSettings.ParseEnabled(
@@ -376,6 +390,7 @@ public sealed class AppController : IAsyncDisposable
         ResetAutomaticRecognitionPolicy();
         AutomaticRecognitionSettingsChanged?.Invoke(this, EventArgs.Empty);
         AutomationLearningSettingsChanged?.Invoke(this, EventArgs.Empty);
+        TrackLaunchTimeSettingsChanged?.Invoke(this, EventArgs.Empty);
         DataChanged?.Invoke(this, EventArgs.Empty);
         if (AutomaticRecognitionEnabled)
         {
@@ -519,6 +534,27 @@ public sealed class AppController : IAsyncDisposable
             await TryApplyAutomationLearningAsync(
                 SelectAutomationLearningActivity(),
                 cancellationToken);
+        }
+    }
+
+    public async Task SetTrackLaunchTimeEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        TrackLaunchTimeEnabled = enabled;
+        await _store.SetSettingAsync(
+            AutomationLaunchTrackingSettings.EnabledKey,
+            enabled ? "true" : "false",
+            cancellationToken);
+        TrackLaunchTimeSettingsChanged?.Invoke(this, EventArgs.Empty);
+        DataChanged?.Invoke(this, EventArgs.Empty);
+        if (enabled && RunningEntry is null)
+        {
+            await StartTimerAsync(
+                SystemEntityIds.UnassignedProjectId,
+                TrackingSource.AutomaticRecognition,
+                showDetails: false,
+                cancellationToken: cancellationToken);
         }
     }
 
@@ -3028,6 +3064,13 @@ public sealed class AppController : IAsyncDisposable
                 await ReviewIdleCandidateAsync(nowUtc);
                 await ReviewExcludedSoftwareVisitsAsync(nowUtc);
                 await ShowPendingStoppedSessionEntryAsync();
+                if (TrackLaunchTimeEnabled && RunningEntry is null)
+                {
+                    await StartTimerAsync(
+                        SystemEntityIds.UnassignedProjectId,
+                        TrackingSource.AutomaticRecognition,
+                        showDetails: false);
+                }
                 await Task.Delay(300);
                 QueueCurrentSoftwareUsage(force: true);
                 if (AutomaticRecognitionEnabled)

@@ -861,6 +861,14 @@ public static class AutomationLearningSettings
         string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
 }
 
+public static class AutomationLaunchTrackingSettings
+{
+    public const string EnabledKey = "automation.track-launch-time.enabled";
+
+    public static bool ParseEnabled(string? value) =>
+        string.Equals(value, "true", StringComparison.OrdinalIgnoreCase);
+}
+
 public enum BreakReminderPlacement
 {
     BottomRight,

@@ -1478,6 +1478,11 @@
                                               VerticalAlignment="Center" Margin="0,0,12,0"
                                               Checked="AutomationLearningCheck_Changed"
                                               Unchecked="AutomationLearningCheck_Changed" />
+                                    <CheckBox x:Name="AutomationTrackLaunchCheck" Content="Track computer launch"
+                                              ToolTip="Automatically start tracking when Log O'clock starts, and stop on logout, lock/sleep, or app exit"
+                                              VerticalAlignment="Center" Margin="0,0,12,0"
+                                              Checked="AutomationTrackLaunchCheck_Changed"
+                                              Unchecked="AutomationTrackLaunchCheck_Changed" />
                                     <Button Content="Capture current window" Margin="0,0,8,0"
                                             Click="CaptureCurrentAutomation_Click" />
                                     <Button Content="Add automation" Style="{StaticResource PrimaryButton}"
@@ -2461,6 +2466,13 @@
                               Checked="RecognitionCheck_Changed" Unchecked="RecognitionCheck_Changed" />
                     <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
                                 Text="Window titles are matched in memory and unknown titles are never stored. The app has no telemetry; network access occurs only for Trello or Google Sheets connections configured in this profile." />
+                    <CheckBox x:Name="TrackLaunchCheck" Margin="0,24,0,8"
+                              Content="Track all time when computer is launched"
+                              Style="{StaticResource ToggleSwitchStyle}"
+                              Checked="TrackLaunchCheck_Changed"
+                              Unchecked="TrackLaunchCheck_Changed" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                               Text="Starts a time entry automatically whenever Log O'clock is running. Stops tracking when logging out, locking/sleeping (according to session behavior), or exiting the application." />
                     <TextBlock Text="Full automatic mode grace period"
                                FontWeight="SemiBold" Margin="0,28,0,6" />
                     <StackPanel Orientation="Horizontal">

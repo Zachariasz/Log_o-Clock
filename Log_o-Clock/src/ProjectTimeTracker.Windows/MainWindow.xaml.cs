@@ -91,6 +91,7 @@ public partial class MainWindow : Window
     private bool _updatingTargetFilter;
     private bool _updatingAutomaticRecognitionControls;
     private bool _updatingAutomationLearningControls;
+    private bool _updatingTrackLaunchControls;
     private string _automationSearchText = string.Empty;
     private AutomationLearningNotice? _automationLearningNotice;
     private readonly DispatcherTimer _automationNoticeTimer = new()
@@ -262,6 +263,7 @@ public partial class MainWindow : Window
         _controller.AutomaticRecognitionSettingsChanged += Controller_AutomaticRecognitionSettingsChanged;
         _controller.AutomationLearningSettingsChanged += Controller_AutomationLearningSettingsChanged;
         _controller.AutomationLearningNoticeChanged += Controller_AutomationLearningNoticeChanged;
+        _controller.TrackLaunchTimeSettingsChanged += Controller_TrackLaunchTimeSettingsChanged;
         _automationNoticeTimer.Tick += AutomationNoticeTimer_Tick;
         _trelloSync.SyncCompleted += TrelloSync_SyncCompleted;
         _googleSheetsSync.SyncCompleted += GoogleSheetsSync_SyncCompleted;
@@ -299,6 +301,7 @@ public partial class MainWindow : Window
         _controller.AutomaticRecognitionSettingsChanged -= Controller_AutomaticRecognitionSettingsChanged;
         _controller.AutomationLearningSettingsChanged -= Controller_AutomationLearningSettingsChanged;
         _controller.AutomationLearningNoticeChanged -= Controller_AutomationLearningNoticeChanged;
+        _controller.TrackLaunchTimeSettingsChanged -= Controller_TrackLaunchTimeSettingsChanged;
         _automationNoticeTimer.Stop();
         _automationNoticeTimer.Tick -= AutomationNoticeTimer_Tick;
         _trelloSync.SyncCompleted -= TrelloSync_SyncCompleted;
@@ -1108,7 +1111,7 @@ public partial class MainWindow : Window
             HistorySaveViewButton, HistoryClearSortingButton, HistoryColumnsButton,
             HistoryThisMonthButton, HistoryThisWeekButton, HistoryTodayButton,
             ClientsGrid, ProjectsGrid, TargetProjectCombo, CustomTargetsGrid, TaskProjectCombo, TasksGrid, TagsGrid,
-            AutomationProjectCombo, AutomationSearchText, AutomationLearningCheck,
+            AutomationProjectCombo, AutomationSearchText, AutomationLearningCheck, AutomationTrackLaunchCheck,
             AutomationNeedsAttentionPanel, AutomationSoftwareGrid, AutomationRulesGrid,
             SoftwareProjectCombo, SoftwareGrid, RuleProjectCombo, RulesGrid,
             ReportRangePicker, ReportClientCombo, ReportProjectCombo, ReportTaskCombo,
@@ -1118,7 +1121,7 @@ public partial class MainWindow : Window
             ReportSoftwareLegendItems, ReportGrid, ReportTargetsList,
             ReportSaveViewButton, ReportColumnsButton,
             SidebarTargetsPanel, SidebarTargetsResizeThumb, TargetsGrid, FloatingTargetsGrid,
-            SettingsCategoryTabs, RecognitionCheck, AutomaticRecognitionToggle,
+            SettingsCategoryTabs, RecognitionCheck, TrackLaunchCheck, AutomaticRecognitionToggle,
             AutomaticRecognitionGraceMinutesText, AutomaticRecognitionGraceValidationText,
             SessionBehaviorCombo, SessionBehaviorDescriptionText,
             RecentEntryResumeMinutesText, RecentEntryResumeValidationText,
@@ -3434,6 +3437,7 @@ public partial class MainWindow : Window
             ApplySoftwareFilter();
             UpdateAutomationNeedsAttention();
             UpdateAutomationLearningControls();
+            UpdateTrackLaunchControls();
 
             var runningTaskId = _controller.RunningEntry?.TaskId;
             await ReloadTimerTasksAsync(
@@ -3465,6 +3469,7 @@ public partial class MainWindow : Window
         ReportRangePicker.SetRange(new DateTime(today.Year, today.Month, 1), today, notify: false);
         RecognitionCheck.IsChecked = _controller.RecognitionEnabled;
         UpdateAutomaticRecognitionControls();
+        UpdateTrackLaunchControls();
         SessionBehaviorCombo.SelectedIndex =
             _controller.SessionTrackingBehavior == SessionTrackingBehavior.StopTimer ? 0 : 1;
         UpdateSessionBehaviorDescription();
@@ -9501,6 +9506,75 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             ShowError("Could not export the CSV", exception);
+        }
+    }
+
+    private void Controller_TrackLaunchTimeSettingsChanged(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!Dispatcher.CheckAccess())
+        {
+            Dispatcher.Invoke(UpdateTrackLaunchControls);
+            return;
+        }
+
+        UpdateTrackLaunchControls();
+    }
+
+    private void UpdateTrackLaunchControls()
+    {
+        _updatingTrackLaunchControls = true;
+        try
+        {
+            AutomationTrackLaunchCheck.IsChecked = _controller.TrackLaunchTimeEnabled;
+            TrackLaunchCheck.IsChecked = _controller.TrackLaunchTimeEnabled;
+        }
+        finally
+        {
+            _updatingTrackLaunchControls = false;
+        }
+    }
+
+    private async void AutomationTrackLaunchCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingTrackLaunchControls)
+        {
+            return;
+        }
+
+        try
+        {
+            await _controller.SetTrackLaunchTimeEnabledAsync(
+                AutomationTrackLaunchCheck.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            UpdateTrackLaunchControls();
+            ShowError("Could not update launch tracking", exception);
+        }
+    }
+
+    private async void TrackLaunchCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        if (!_loaded || _loading || _updatingTrackLaunchControls)
+        {
+            return;
+        }
+
+        try
+        {
+            await _controller.SetTrackLaunchTimeEnabledAsync(
+                TrackLaunchCheck.IsChecked == true);
+        }
+        catch (Exception exception)
+        {
+            UpdateTrackLaunchControls();
+            ShowError("Could not update launch tracking", exception);
         }
     }
 
